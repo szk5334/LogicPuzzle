@@ -31,7 +31,7 @@ function generateSolution(theme, n) {
       solution[i][key] = item;
     });
   }
-  return { categories, solution, anchorKey };
+  return { categories, solution, anchorKey, subjectKey: theme.subjectKey || null };
 }
 
 // ----- Constraint table -----
@@ -788,7 +788,7 @@ function solveWithClues(categories, clues, trace) {
 
 // ----- Generate a puzzle -----
 function generatePuzzle(theme, n, difficulty) {
-  const { categories, solution, anchorKey } = generateSolution(theme, n);
+  const { categories, solution, anchorKey, subjectKey } = generateSolution(theme, n);
   const allClues = generateAllTrueClues({ categories, solution, anchorKey });
 
   // Bias the clue ordering by difficulty. Each type gets a base weight per band.
@@ -840,6 +840,7 @@ function generatePuzzle(theme, n, difficulty) {
     categories,
     solution,
     anchorKey,
+    subjectKey,
     clues: minimal,
     trace,
     status: finalSolve.status,
@@ -993,6 +994,59 @@ function verifyMarks(puzzle, gridState) {
     if (markValue !== truth) count++;
   }
   return { status: count === 0 ? 'all-consistent' : 'has-errors', count };
+}
+
+// For a given subject (e.g. 'Felix' in the 'suspect' category), look at the
+// player's grid and return the ✓-marked partner in each OTHER category.
+// Returns { [catKey]: value | null } — null means "player hasn't found it yet".
+function getSubjectAttrs(puzzle, gridState, subjectKey, subjectVal) {
+  const cats = Object.keys(puzzle.categories);
+  const attrs = {};
+  for (const cat of cats) {
+    if (cat === subjectKey) continue;
+    let found = null;
+    for (const v of puzzle.categories[cat]) {
+      const key = canonKey(subjectKey, subjectVal, cat, v);
+      if (gridState[key]?.committed === 'check') { found = v; break; }
+    }
+    attrs[cat] = found;
+  }
+  return attrs;
+}
+
+// Per-subject state: 'incomplete' (some blanks), 'correct' (all filled and right),
+// or 'wrong' (all filled but at least one disagrees with truth).
+function entityStatus(puzzle, gridState, subjectKey, subjectVal) {
+  const attrs = getSubjectAttrs(puzzle, gridState, subjectKey, subjectVal);
+  const cats = Object.keys(puzzle.categories).filter((c) => c !== subjectKey);
+  for (const cat of cats) {
+    if (attrs[cat] == null) return { state: 'incomplete', attrs };
+  }
+  for (const cat of cats) {
+    const truth = solutionTruth(puzzle.solution, subjectKey, subjectVal, cat, attrs[cat]);
+    if (truth !== 'yes') return { state: 'wrong', attrs };
+  }
+  return { state: 'correct', attrs };
+}
+
+// Puzzle-wide status. 'won' = every subject's row is complete AND every player
+// mark agrees with the truth. 'wrong' = every subject's row is complete but
+// at least one mark (here or elsewhere on the grid) disagrees with truth.
+// 'in-progress' otherwise.
+function puzzleStatus(puzzle, gridState) {
+  const subjectKey = puzzle.subjectKey;
+  if (!subjectKey) return 'in-progress';
+  const subjects = puzzle.categories[subjectKey];
+  let allFilled = true;
+  for (const subj of subjects) {
+    if (entityStatus(puzzle, gridState, subjectKey, subj).state === 'incomplete') {
+      allFilled = false;
+      break;
+    }
+  }
+  if (!allFilled) return 'in-progress';
+  const verify = verifyMarks(puzzle, gridState);
+  return verify.count === 0 ? 'won' : 'wrong';
 }
 
 // Walk a fact's source chain to find what ultimately produced it.
@@ -1254,6 +1308,7 @@ const themes = {
     name: 'classic',
     label: 'Classic — letters & numerals',
     anchorKey: 'position',
+    subjectKey: 'letter',
     categoriesFor(n) {
       return {
         position: Array.from({ length: n }, (_, i) => i + 1),
@@ -1264,6 +1319,12 @@ const themes = {
     },
     prompt: 'Determine which letter, numeral, and shape go at each position.',
     phrase(cat, x) { return `${cat[0].toUpperCase()}=${x}`; },
+    factPhrasing(subj, attrs) {
+      const position = attrs.position != null ? `position ${attrs.position}` : '_____';
+      const numeral = attrs.numeral ?? '_____';
+      const shape = attrs.shape ?? '_____';
+      return `${subj} pairs with ${numeral} and ${shape}, at ${position}.`;
+    },
     propLine(catA, a, catB, b, polarity) {
       const op = polarity === 'yes' ? '↔' : '⊥';
       return `${this.phrase(catA, a)} ${op} ${this.phrase(catB, b)}`;
@@ -1293,6 +1354,7 @@ const themes = {
     name: 'soapOpera',
     label: 'Soap Opera — the dinner party',
     anchorKey: 'seat',
+    subjectKey: 'guest',
     categoriesFor(n) {
       return {
         seat: Array.from({ length: n }, (_, i) => i + 1),
@@ -1308,6 +1370,12 @@ const themes = {
       if (cat === 'drink') return `the ${x} drinker`;
       if (cat === 'secret') return `whoever was hiding ${x}`;
       return `${cat}=${x}`;
+    },
+    factPhrasing(subj, attrs) {
+      const seat = attrs.seat != null ? `seat ${attrs.seat}` : '_____';
+      const drink = attrs.drink ?? '_____';
+      const secret = attrs.secret ?? '_____';
+      return `${subj} sat at ${seat}, drank the ${drink}, and was hiding ${secret}.`;
     },
     propLine(catA, a, catB, b, polarity) {
       // Special phrasing when seat is involved (positional).
@@ -1348,6 +1416,7 @@ const themes = {
     name: 'noir',
     label: 'Noir — the suspects',
     anchorKey: 'room',
+    subjectKey: 'suspect',
     categoriesFor(n) {
       return {
         room: Array.from({ length: n }, (_, i) => i + 1),
@@ -1363,6 +1432,12 @@ const themes = {
       if (cat === 'evidence') return `the one who left the ${x}`;
       if (cat === 'color') return `the one in ${x}`;
       return `${cat}=${x}`;
+    },
+    factPhrasing(subj, attrs) {
+      const room = attrs.room != null ? `room ${attrs.room}` : '_____';
+      const evidence = attrs.evidence ?? '_____';
+      const color = attrs.color ?? '_____';
+      return `${subj} wore ${color}, left ${evidence}, and was in ${room}.`;
     },
     propLine(catA, a, catB, b, polarity) {
       if (catA === 'room' || catB === 'room') {
@@ -1584,9 +1659,10 @@ export default function App() {
       }
       return out;
     });
-    // Any cell change invalidates the last hint/verify result.
-    setHint(null);
-    setVerifyResult(null);
+    // Hint/verify panels intentionally PERSIST across mark actions — the
+    // player asked for them and may keep referring back. They're cleared
+    // only when a new hint is run, the grid is reset, or the puzzle is
+    // regenerated.
   };
 
   // Whether the active tool is allowed to touch a given cell.
@@ -1720,7 +1796,107 @@ export default function App() {
         .ink { color: #1f1a14; }
         .ink-mute { color: #4a3f30; }
         .ink-red { color: #8b1a1a; }
+        .ink-green { color: #3f6a2e; }
         .ink-faded { color: #7a6a52; }
+        /* Variant stamps (green/red) for case-status. */
+        .stamp-green {
+          border: 2px solid #3f6a2e;
+          color: #3f6a2e;
+          padding: 2px 8px;
+          letter-spacing: 0.15em;
+          display: inline-block;
+          transform: rotate(-2deg);
+          font-weight: 700;
+          background: rgba(220,235,200,0.45);
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 11px;
+        }
+        .stamp-red {
+          border: 2px solid #8b1a1a;
+          color: #8b1a1a;
+          padding: 2px 8px;
+          letter-spacing: 0.15em;
+          display: inline-block;
+          transform: rotate(-2deg);
+          font-weight: 700;
+          background: rgba(255,235,225,0.45);
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 11px;
+        }
+        /* Placeholder reserves the same vertical real-estate as a stamp so the
+           header row doesn't shift when the game state goes from in-progress
+           to won/wrong. */
+        .stamp-placeholder {
+          display: inline-block;
+          padding: 2px 8px;
+          border: 2px solid transparent;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 11px;
+          letter-spacing: 0.15em;
+        }
+        /* Horizontal scrolling clue strip — sits between the Legend and the
+           grid. scroll-snap keeps each card neatly aligned after a swipe. */
+        .clue-scroll {
+          display: flex;
+          gap: 10px;
+          overflow-x: auto;
+          padding: 8px 4px 14px;
+          margin-top: 8px;
+          scroll-snap-type: x mandatory;
+          -webkit-overflow-scrolling: touch;
+        }
+        .clue-scroll::-webkit-scrollbar { height: 6px; }
+        .clue-scroll::-webkit-scrollbar-thumb { background: rgba(139,26,26,0.25); border-radius: 3px; }
+        .clue-card {
+          flex: 0 0 220px;
+          padding: 8px 10px 10px;
+          scroll-snap-align: start;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+        .clue-card:nth-child(odd)  { transform: rotate(-0.4deg); }
+        .clue-card:nth-child(even) { transform: rotate(0.4deg); }
+        .clue-card-num {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 10px;
+          font-weight: 700;
+          color: #8b1a1a;
+          letter-spacing: 0.1em;
+        }
+        .clue-card-body {
+          font-size: 12px;
+          line-height: 1.35;
+          color: #1f1a14;
+        }
+        /* Per-subject prose lines in the Deductions panel. */
+        .deduction-line {
+          display: flex;
+          align-items: baseline;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 6px 10px;
+          background: #fbf6e9;
+          border: 1px solid #c8b48a;
+          font-size: 13px;
+          line-height: 1.45;
+          color: #1f1a14;
+        }
+        .deduction-line.correct { border-color: #6a8e54; background: rgba(220,235,200,0.35); }
+        .deduction-line.wrong   { border-color: #b04545; background: rgba(255,235,225,0.4); }
+        .deduction-text { flex: 1 1 auto; }
+        .deduction-icon {
+          font-weight: 700;
+          font-size: 16px;
+          line-height: 1;
+          flex: 0 0 18px;
+          text-align: right;
+        }
+        .deduction-icon-placeholder {
+          display: inline-block;
+          width: 18px;
+          flex: 0 0 18px;
+        }
         .pin-card {
           background: #fbf6e9;
           border: 1px solid #c8b48a;
@@ -1879,13 +2055,17 @@ export default function App() {
         .grid-cell {
           background: #fbf6e9;
           border: none;
-          position: relative;
           padding: 0; margin: 0;
+          position: relative;
           font-family: 'JetBrains Mono', monospace;
           line-height: 1;
           cursor: pointer;
           transition: background 0.08s;
           user-select: none;
+          /* Force block so the inline-baseline descender doesn't expand the td. */
+          display: block;
+          width: 100%;
+          height: 100%;
         }
         .grid-cell:hover { background: #f1e6c8; }
         .grid-cell.committed-x { color: #8b1a1a; font-weight: 700; }
@@ -1965,6 +2145,10 @@ export default function App() {
           --cat-row-w: calc(var(--cat-row-base) * var(--grid-zoom));
         }
         .sc-table th, .sc-table td { padding: 0; margin: 0; }
+        /* Cells that hold the clickable button (or are empty staircase voids):
+           kill the inline line-height so the button child's actual size, not
+           inline whitespace, determines the row height. */
+        .sc-table td.sc-td, .sc-table td.sc-empty { line-height: 0; vertical-align: top; }
         .sc-corner {
           background: transparent;
           border: none;
@@ -2275,6 +2459,7 @@ export default function App() {
                 )}
 
                 <Legend categories={puzzle.categories} anchorKey={puzzle.anchorKey} />
+                <ClueScroll clues={puzzle.clues} theme={theme} />
                 <div className="mt-3 pin-card p-3">
                   <div className="flex items-center justify-end mb-2 gap-2">
                     <div className="zoom-ctrl">
@@ -2307,6 +2492,9 @@ export default function App() {
                   />
                 </div>
               </section>
+
+              {/* Deductions — prose summary per subject + case-status stamp */}
+              <DeductionsPanel puzzle={puzzle} gridState={gridState} theme={theme} />
 
               {/* Metrics */}
               <section>
@@ -2686,6 +2874,67 @@ function Metric({ label, value, note }) {
       <div className="font-display text-3xl ink leading-none">{value}</div>
       <div className="text-[10px] ink-faded mt-1.5 italic">{note}</div>
     </div>
+  );
+}
+
+// Horizontal-scroll clue strip — sits directly above the worksheet grid so the
+// player can glance up at the clues without scrolling back to the Evidence
+// section. Each card is a compact pin-card with the clue's index + full text.
+function ClueScroll({ clues, theme }) {
+  return (
+    <div className="clue-scroll" role="region" aria-label="Clue quick reference">
+      {clues.map((c, i) => (
+        <div key={i} className="clue-card pin-card-tight">
+          <div className="clue-card-num">№{String(i + 1).padStart(2, '0')}</div>
+          <div className="clue-card-body">{theme.renderClue(c)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Per-subject prose lines + status icon, plus a "case status" header that
+// switches to a celebratory or retraction stamp once every subject row is
+// filled. Layout is always rendered — placeholders ("_____") fill unknowns —
+// so the section's height doesn't shift as the player marks cells.
+function DeductionsPanel({ puzzle, gridState, theme }) {
+  const subjectKey = puzzle.subjectKey;
+  if (!subjectKey || !theme.factPhrasing) return null;
+  const subjects = puzzle.categories[subjectKey];
+  const status = puzzleStatus(puzzle, gridState);
+
+  return (
+    <section>
+      <div className="flex items-baseline justify-between mb-3 gap-4 flex-wrap">
+        <div>
+          <div className="text-xs ink-faded tracking-[0.25em] uppercase">Deductions</div>
+          <div className="text-[11px] ink-faded font-mono mt-0.5">
+            fills in as you confirm cells
+          </div>
+        </div>
+        <div className="deductions-status">
+          {status === 'won' && <span className="stamp stamp-green">CASE CLOSED · SOLVED</span>}
+          {status === 'wrong' && <span className="stamp stamp-red">RETRACTION · CHECK YOUR WORK</span>}
+          {status === 'in-progress' && <span className="stamp-placeholder">&nbsp;</span>}
+        </div>
+      </div>
+      <ol className="space-y-2">
+        {subjects.map((subj) => {
+          const { state, attrs } = entityStatus(puzzle, gridState, subjectKey, subj);
+          const line = theme.factPhrasing(subj, attrs);
+          let icon = null;
+          if (state === 'correct') icon = <span className="ink-green deduction-icon">✓</span>;
+          else if (state === 'wrong') icon = <span className="ink-red deduction-icon">✕</span>;
+          else icon = <span className="deduction-icon-placeholder">&nbsp;</span>;
+          return (
+            <li key={subj} className={`deduction-line ${state}`}>
+              <span className="deduction-text">{line}</span>
+              {icon}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
   );
 }
 
