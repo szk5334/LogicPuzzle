@@ -54,6 +54,16 @@ function cloneTable(t) {
 
 function getFact(table, catA, a, catB, b) {
   if (catA === catB) return a === b ? 'yes' : 'no';
+  const entry = table.facts.get(canonKey(catA, a, catB, b));
+  return entry ? entry.value : null;
+}
+
+// Like getFact, but returns the full FactEntry with provenance (source field).
+// Used by cascade and formula-clue propagators when they need to cite the
+// already-established facts that justify a new deduction. Returns null for
+// the synthetic same-category-identity case and for missing facts.
+function getFactEntry(table, catA, a, catB, b) {
+  if (catA === catB) return null;
   return table.facts.get(canonKey(catA, a, catB, b)) ?? null;
 }
 
@@ -67,7 +77,7 @@ function pushFact(table, catA, a, catB, b, value, source, trace) {
     const cur = getFact(table, f.catA, f.a, f.catB, f.b);
     if (cur === f.value) continue;
     if (cur !== null && cur !== f.value) return { ok: false };
-    table.facts.set(canonKey(f.catA, f.a, f.catB, f.b), f.value);
+    table.facts.set(canonKey(f.catA, f.a, f.catB, f.b), f);
     derived.push(f);
     if (trace) trace.push(f);
 
@@ -92,16 +102,20 @@ function pushFact(table, catA, a, catB, b, value, source, trace) {
           const ac = getFact(table, f.catA, f.a, catC, c);
           const bc = getFact(table, f.catB, f.b, catC, c);
           if (ac === 'yes' && bc !== 'yes') {
-            queue.push({ catA: f.catB, a: f.b, catB: catC, b: c, value: 'yes', source: { type: 'transitivity', from: f } });
+            const acE = getFactEntry(table, f.catA, f.a, catC, c);
+            queue.push({ catA: f.catB, a: f.b, catB: catC, b: c, value: 'yes', source: { type: 'transitivity', from: f, deps: acE ? [acE] : [] } });
           }
           if (bc === 'yes' && ac !== 'yes') {
-            queue.push({ catA: f.catA, a: f.a, catB: catC, b: c, value: 'yes', source: { type: 'transitivity', from: f } });
+            const bcE = getFactEntry(table, f.catB, f.b, catC, c);
+            queue.push({ catA: f.catA, a: f.a, catB: catC, b: c, value: 'yes', source: { type: 'transitivity', from: f, deps: bcE ? [bcE] : [] } });
           }
           if (ac === 'no' && bc === null) {
-            queue.push({ catA: f.catB, a: f.b, catB: catC, b: c, value: 'no', source: { type: 'transitivity', from: f } });
+            const acE = getFactEntry(table, f.catA, f.a, catC, c);
+            queue.push({ catA: f.catB, a: f.b, catB: catC, b: c, value: 'no', source: { type: 'transitivity', from: f, deps: acE ? [acE] : [] } });
           }
           if (bc === 'no' && ac === null) {
-            queue.push({ catA: f.catA, a: f.a, catB: catC, b: c, value: 'no', source: { type: 'transitivity', from: f } });
+            const bcE = getFactEntry(table, f.catB, f.b, catC, c);
+            queue.push({ catA: f.catA, a: f.a, catB: catC, b: c, value: 'no', source: { type: 'transitivity', from: f, deps: bcE ? [bcE] : [] } });
           }
         }
       }
@@ -110,12 +124,23 @@ function pushFact(table, catA, a, catB, b, value, source, trace) {
       const remB = table.categories[f.catB].filter((b2) => getFact(table, f.catA, f.a, f.catB, b2) !== 'no');
       if (remB.length === 0) return { ok: false };
       if (remB.length === 1 && getFact(table, f.catA, f.a, f.catB, remB[0]) !== 'yes') {
-        queue.push({ catA: f.catA, a: f.a, catB: f.catB, b: remB[0], value: 'yes', source: { type: 'last-option', from: f } });
+        // The deduction depends on all the other (N-1) "no" facts in this row,
+        // which together exhaust the alternatives. f itself is one of them; the
+        // rest are pulled from the table as deps.
+        const exhausted = table.categories[f.catB]
+          .filter((b2) => b2 !== remB[0])
+          .map((b2) => getFactEntry(table, f.catA, f.a, f.catB, b2))
+          .filter(Boolean);
+        queue.push({ catA: f.catA, a: f.a, catB: f.catB, b: remB[0], value: 'yes', source: { type: 'last-option', from: f, deps: exhausted } });
       }
       const remA = table.categories[f.catA].filter((a2) => getFact(table, f.catA, a2, f.catB, f.b) !== 'no');
       if (remA.length === 0) return { ok: false };
       if (remA.length === 1 && getFact(table, f.catA, remA[0], f.catB, f.b) !== 'yes') {
-        queue.push({ catA: f.catA, a: remA[0], catB: f.catB, b: f.b, value: 'yes', source: { type: 'last-option', from: f } });
+        const exhausted = table.categories[f.catA]
+          .filter((a2) => a2 !== remA[0])
+          .map((a2) => getFactEntry(table, f.catA, a2, f.catB, f.b))
+          .filter(Boolean);
+        queue.push({ catA: f.catA, a: remA[0], catB: f.catB, b: f.b, value: 'yes', source: { type: 'last-option', from: f, deps: exhausted } });
       }
     }
   }
@@ -422,13 +447,22 @@ function clueFormula(formula, type, render) {
         if (evalFormula(formula, vmap) === true) valid.push(vmap);
       }
       if (valid.length === 0) return { ok: false };
+      // Any atom already known when this propagator runs is part of why
+      // the new deduction follows from the clue. Collect those as deps.
+      const knownDeps = [];
+      for (let i = 0; i < n; i++) {
+        if (known[i] !== null) {
+          const e = getFactEntry(table, atoms[i].catA, atoms[i].a, atoms[i].catB, atoms[i].b);
+          if (e) knownDeps.push(e);
+        }
+      }
       let changed = false;
       for (let i = 0; i < n; i++) {
         if (known[i] !== null) continue;
         const vs = new Set(valid.map(a => a.get(atoms[i].key)));
         if (vs.size === 1) {
           const v = vs.values().next().value;
-          const r = pushFact(table, atoms[i].catA, atoms[i].a, atoms[i].catB, atoms[i].b, v, { type: 'clue', clue: this }, trace);
+          const r = pushFact(table, atoms[i].catA, atoms[i].a, atoms[i].catB, atoms[i].b, v, { type: 'clue', clue: this, deps: knownDeps }, trace);
           if (!r.ok) return { ok: false };
           if (r.derived.length > 0) changed = true;
         }
@@ -964,38 +998,67 @@ function verifyMarks(puzzle, gridState) {
 // Walk a fact's source chain to find what ultimately produced it.
 // Cascade types (exclusivity/transitivity/last-option) recurse via source.from.
 // Terminal types: 'clue' (a clue fired) or 'mark' (a player mark).
+// Does this fact's derivation closure include any clue-rooted leaf?
+// Walks both `source.from` (trigger) and `source.deps` (extra inputs) so
+// we don't miss clue-roots that live on a non-trigger branch of the DAG.
 function chainTerminusType(fact) {
-  let cur = fact;
-  while (cur && cur.source) {
-    const t = cur.source.type;
-    if (t === 'clue') return 'clue';
-    if (t === 'mark') return 'mark';
-    cur = cur.source.from;
+  if (!fact || !fact.source) return 'unknown';
+  const visited = new Set();
+  let sawClue = false;
+  let sawMark = false;
+  function visit(f) {
+    if (!f) return;
+    const key = canonKey(f.catA, f.a, f.catB, f.b);
+    if (visited.has(key)) return;
+    visited.add(key);
+    const s = f.source;
+    if (!s) return;
+    if (s.type === 'clue') { sawClue = true; return; }
+    if (s.type === 'mark') { sawMark = true; return; }
+    if (s.from) visit(s.from);
+    for (const d of (s.deps || [])) visit(d);
   }
+  visit(fact);
+  if (sawClue) return 'clue';
+  if (sawMark) return 'mark';
   return 'unknown';
 }
 
-// Build a flat proof chain for one fact: walk source.from until we hit a clue or a mark.
-// Returns an array of {kind, fact, cascadeType?, clue?} entries ordered from the fact
-// back to its terminus.
-function buildProofChain(fact) {
+// Build a proof DAG for one fact: walk both source.from (the triggering fact)
+// and source.deps (additional facts that participate in the deduction). Each
+// fact appears once. Output is topologically sorted — every dependency appears
+// before the step that consumes it — so the UI can render it linearly and the
+// proof reads top-to-bottom from inputs to conclusion.
+function buildProofDag(target) {
   const steps = [];
-  let cur = fact;
-  // Cap walk depth to avoid pathological cycles (shouldn't happen but defensive).
-  for (let i = 0; i < 100 && cur && cur.source; i++) {
-    const s = cur.source;
-    if (s.type === 'clue') {
-      steps.push({ kind: 'clue', fact: cur, clue: s.clue });
-      return steps;
+  const visited = new Set();
+  function walk(fact) {
+    if (!fact) return;
+    const key = canonKey(fact.catA, fact.a, fact.catB, fact.b);
+    if (visited.has(key)) return;
+    visited.add(key);
+    const s = fact.source;
+    if (!s) {
+      steps.push({ kind: 'given', fact });
+      return;
     }
     if (s.type === 'mark') {
-      steps.push({ kind: 'mark', fact: cur });
-      return steps;
+      steps.push({ kind: 'mark', fact });
+      return;
     }
-    // Cascade step
-    steps.push({ kind: 'cascade', cascadeType: s.type, fact: cur });
-    cur = s.from;
+    if (s.type === 'clue') {
+      const deps = s.deps || [];
+      deps.forEach(walk);
+      steps.push({ kind: 'clue', fact, clue: s.clue, deps });
+      return;
+    }
+    // cascade — trigger fact + extra deps
+    walk(s.from);
+    const deps = s.deps || [];
+    deps.forEach(walk);
+    steps.push({ kind: 'cascade', cascadeType: s.type, fact, from: s.from, deps });
   }
+  walk(target);
   return steps;
 }
 
@@ -1010,7 +1073,7 @@ function hintTier1(puzzle, gridState) {
     return { tier: 1, contradiction: true, ...verifyMarks(puzzle, gridState) };
   }
 
-  // Walk trace post-mark-seed for the first fact whose chain reaches a clue.
+  // Walk trace post-mark-seed for the first fact whose DAG reaches a clue.
   let inMarkSeed = false;
   for (const t of trace) {
     if (t.marker === 'mark-seed') { inMarkSeed = true; continue; }
@@ -1018,15 +1081,19 @@ function hintTier1(puzzle, gridState) {
     if (t.marker) continue;
     if (inMarkSeed) continue; // skip cascade-from-marks during seeding phase
     if (chainTerminusType(t) === 'clue') {
-      const chain = buildProofChain(t);
-      const originClue = chain.find((s) => s.kind === 'clue')?.clue;
-      return { tier: 1, fact: t, originClue, chain };
+      const dag = buildProofDag(t);
+      const originClue = dag.find((s) => s.kind === 'clue')?.clue;
+      return { tier: 1, fact: t, originClue, dag };
     }
   }
+  // No clue-driven progress reachable. If the player has wrong marks,
+  // route to verify instead of the generic noProgress message.
+  const verify = verifyMarks(puzzle, gridState);
+  if (verify.count > 0) return { tier: 1, wrongMarks: true, ...verify };
   return { tier: 1, noProgress: true };
 }
 
-// Tier 2: full proof chain for a focus cell. If no focus cell supplied, picks the same
+// Tier 2: full proof DAG for a focus cell. If no focus cell supplied, picks the same
 // first-clue-driven fact Tier 1 would pick (so T2 = full proof of T1's headline).
 function hintTier2(puzzle, gridState, focusCell) {
   const marks = marksToFacts(gridState);
@@ -1046,6 +1113,7 @@ function hintTier2(puzzle, gridState, focusCell) {
     );
     if (!target) return { tier: 2, focusUnreachable: true };
   } else {
+    // Pass A: first clue-driven fact (post mark-seed phase).
     let inMarkSeed = false;
     for (const t of trace) {
       if (t.marker === 'mark-seed') { inMarkSeed = true; continue; }
@@ -1054,11 +1122,34 @@ function hintTier2(puzzle, gridState, focusCell) {
       if (inMarkSeed) continue;
       if (chainTerminusType(t) === 'clue') { target = t; break; }
     }
-    if (!target) return { tier: 2, noProgress: true };
+    // Pass B: if no clue-driven step remains, fall back to mark-seed cascades —
+    // deductions reachable from current marks alone (exclusivity/transitivity/etc).
+    // Pick the first cascade-derived fact the player hasn't already committed.
+    if (!target) {
+      let inSeed = false;
+      for (const t of trace) {
+        if (t.marker === 'mark-seed') { inSeed = true; continue; }
+        if (t.marker === 'pass-start') { inSeed = false; continue; }
+        if (t.marker) continue;
+        if (!inSeed) continue;
+        if (!t.source || t.source.type === 'mark') continue; // skip the marks themselves
+        const key = canonKey(t.catA, t.a, t.catB, t.b);
+        if (gridState[key]?.committed != null) continue; // already on the player's grid
+        target = t;
+        break;
+      }
+    }
+    // Pass C: nothing reachable at all. If the player has wrong marks, route
+    // to verify. Otherwise truly stuck.
+    if (!target) {
+      const verify = verifyMarks(puzzle, gridState);
+      if (verify.count > 0) return { tier: 2, wrongMarks: true, ...verify };
+      return { tier: 2, noProgress: true };
+    }
   }
 
-  const chain = buildProofChain(target);
-  return { tier: 2, fact: target, chain };
+  const dag = buildProofDag(target);
+  return { tier: 2, fact: target, dag };
 }
 
 // Tier 3: confirm the puzzle is still solvable from current marks. Three outcomes:
@@ -1802,6 +1893,9 @@ export default function App() {
         /* Scratch-mode-on tints. Override committed cell backgrounds. */
         .grid-cell.scratch-mode.committed-x { background: rgba(139,26,26,0.18); }
         .grid-cell.scratch-mode.committed-check { background: rgba(70,110,50,0.18); }
+        /* Belt-and-suspenders: hide the committed glyph in scratch mode at CSS
+           level too, in case the React conditional somehow doesn't fire. */
+        .grid-cell.scratch-mode .glyph { display: none; }
         /* Main glyph (X / check / scratch when alone) */
         .grid-cell .glyph {
           display: flex; align-items: center; justify-content: center;
@@ -2388,12 +2482,20 @@ function HintResult({ hint, theme }) {
       return (
         <div className="ink text-sm leading-relaxed">
           <span className="hint-tag">tier 1</span>
-          From your current marks, no further clue-driven deduction is possible.
-          Try Tier 2 (proof for a specific cell) or Tier 3 (overall solvability).
+          No clue-driven next step from here. Either you've extracted everything the clues offer — in which case just keep propagating exclusivity through your committed marks — or try Tier 2 to see a proof for a specific cell.
         </div>
       );
     }
-    const clueIdx = hint.originClue ? null : null;  // index resolution happens in render below if needed
+    if (hint.wrongMarks) {
+      return (
+        <div className="ink text-sm leading-relaxed">
+          <span className="hint-tag">tier 1</span>
+          No clue-driven progress is possible, and you have{' '}
+          <strong className="ink-red">{hint.count}</strong> incorrect{' '}
+          {hint.count === 1 ? 'mark' : 'marks'} blocking it. Use <em>verify marks</em> to locate them.
+        </div>
+      );
+    }
     return (
       <div className="ink text-sm leading-relaxed">
         <span className="hint-tag">tier 1 · next step</span>
@@ -2413,7 +2515,17 @@ function HintResult({ hint, theme }) {
       return (
         <div className="ink text-sm leading-relaxed">
           <span className="hint-tag">tier 2</span>
-          No new deduction is currently reachable from your marks.
+          No new deduction is currently reachable from your marks. The clues may already be exhausted — try propagating exclusivity through your existing committed cells row by row.
+        </div>
+      );
+    }
+    if (hint.wrongMarks) {
+      return (
+        <div className="ink text-sm leading-relaxed">
+          <span className="hint-tag">tier 2</span>
+          No new deduction is reachable, and you have{' '}
+          <strong className="ink-red">{hint.count}</strong> incorrect{' '}
+          {hint.count === 1 ? 'mark' : 'marks'} blocking progress. Use <em>verify marks</em> to locate them.
         </div>
       );
     }
@@ -2425,41 +2537,119 @@ function HintResult({ hint, theme }) {
         </div>
       );
     }
-    // hint.chain is ordered from focus fact back to terminus.
-    // Render in forward order (terminus first, target last) so it reads like a proof:
-    // clue/mark → cascade → ... → target.
-    const steps = [...hint.chain].reverse();
+    // hint.dag is topologically ordered: dependencies first, target last.
+    // The FINAL step is the conclusion's own derivation — we pull its rule and
+    // direct inputs up into a prose headline, then render the upstream steps
+    // as supporting evidence (how each input was established).
+    const steps = hint.dag;
+    const final = steps[steps.length - 1];
+    const supporting = steps.slice(0, -1);
+
+    // Headline reads as: "By <rule>: <input>, <input>, therefore <conclusion>."
+    let headline;
+    if (final.kind === 'cascade') {
+      const inputs = [final.from, ...final.deps].filter(Boolean);
+      const prefix = final.cascadeType === 'last-option'
+        ? 'By elimination'
+        : `By ${final.cascadeType}`;
+      headline = (
+        <>
+          <em>{prefix}:</em>{' '}
+          {inputs.map((d, i) => (
+            <span key={i}>
+              {i > 0 ? ', ' : ''}
+              <em>{factSentence(d, theme)}</em>
+            </span>
+          ))}
+          , therefore <strong>{factSentence(final.fact, theme)}</strong>.
+        </>
+      );
+    } else if (final.kind === 'clue') {
+      headline = (
+        <>
+          <em>By clue "{theme.renderClue(final.clue)}"</em>
+          {final.deps.length > 0 && (
+            <>
+              {', given '}
+              {final.deps.map((d, i) => (
+                <span key={i}>
+                  {i > 0 ? ', ' : ''}
+                  <em>{factSentence(d, theme)}</em>
+                </span>
+              ))}
+            </>
+          )}
+          {': '}<strong>{factSentence(final.fact, theme)}</strong>.
+        </>
+      );
+    } else {
+      headline = <strong>{factSentence(hint.fact, theme)}</strong>;
+    }
+
     return (
       <div className="ink text-sm leading-relaxed">
         <span className="hint-tag">tier 2 · proof</span>
-        <strong>{factSentence(hint.fact, theme)}</strong>
-        <div className="mt-2 ink-faded text-xs uppercase tracking-widest mb-1">because:</div>
-        <div className="space-y-1 text-sm">
-          {steps.map((s, i) => {
-            if (s.kind === 'clue') {
-              return (
-                <div key={i} className="proof-step">
-                  <em>Clue:</em> "{theme.renderClue(s.clue)}" — gives{' '}
-                  <strong>{factSentence(s.fact, theme)}</strong>
-                </div>
-              );
-            }
-            if (s.kind === 'mark') {
-              return (
-                <div key={i} className="proof-step">
-                  <span className="ink-red">Your mark:</span>{' '}
-                  <strong>{factSentence(s.fact, theme)}</strong>
-                </div>
-              );
-            }
-            // cascade
-            return (
-              <div key={i} className="proof-step ink-faded">
-                {cascadePhrase(s.cascadeType)} → {factSentence(s.fact, theme)}
-              </div>
-            );
-          })}
-        </div>
+        <div>{headline}</div>
+        {supporting.length > 0 && (
+          <>
+            <div className="mt-2 ink-faded text-xs uppercase tracking-widest mb-1">
+              Chain that established those inputs:
+            </div>
+            <div className="space-y-1 text-sm">
+              {supporting.map((s, i) => {
+                if (s.kind === 'clue') {
+                  return (
+                    <div key={i} className="proof-step">
+                      <em>Clue:</em> "{theme.renderClue(s.clue)}" — gives{' '}
+                      <strong>{factSentence(s.fact, theme)}</strong>
+                      {s.deps.length > 0 && (
+                        <span className="ink-faded">
+                          {' '}(given{' '}
+                          {s.deps.map((d, j) => (
+                            <span key={j}>
+                              {j > 0 ? ', ' : ''}
+                              <em>{factSentence(d, theme)}</em>
+                            </span>
+                          ))}
+                          )
+                        </span>
+                      )}
+                    </div>
+                  );
+                }
+                if (s.kind === 'mark') {
+                  return (
+                    <div key={i} className="proof-step">
+                      <span className="ink-red">Your mark:</span>{' '}
+                      <strong>{factSentence(s.fact, theme)}</strong>
+                    </div>
+                  );
+                }
+                if (s.kind === 'given') {
+                  return (
+                    <div key={i} className="proof-step ink-faded">
+                      Given: <strong>{factSentence(s.fact, theme)}</strong>
+                    </div>
+                  );
+                }
+                // cascade — list every input fact
+                const inputs = [s.from, ...s.deps].filter(Boolean);
+                return (
+                  <div key={i} className="proof-step ink-faded">
+                    {inputs.map((src, j) => (
+                      <span key={j}>
+                        {j > 0 ? ' + ' : ''}
+                        <em>{factSentence(src, theme)}</em>
+                      </span>
+                    ))}
+                    {' '}({cascadePhrase(s.cascadeType)}) →{' '}
+                    <strong className="ink">{factSentence(s.fact, theme)}</strong>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
     );
   }
@@ -2710,7 +2900,7 @@ function StaircaseGrid({ puzzle, gridState, onTap, scratchMode, activeTool, zoom
                             className={cellClasses}
                             aria-label={`${rowCat}=${rowItem} vs ${colCat}=${colItem}: ${committed || 'blank'}${scratch ? ` (scratch:${scratch})` : ''}`}
                           >
-                            {glyph && <span className="glyph">{glyph}</span>}
+                            {glyph && !scratchMode && <span className="glyph">{glyph}</span>}
                             {solo && <span className={`scratch-solo ${scratchMode ? '' : 'faded'}`}>{solo}</span>}
                             {corner && <span className="scratch-corner">{corner}</span>}
                           </button>
