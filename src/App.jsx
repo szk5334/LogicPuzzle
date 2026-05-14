@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
 
 // ============================================================
 // ENGINE
@@ -1566,6 +1566,12 @@ function shortLabel(s, maxLen = 7) {
 export default function App() {
   const [numCategories, setNumCategories] = useState(4);
   const [numItems, setNumItems] = useState(4);
+
+  // Ref on the pin-card that wraps the grid. Used by both the auto-fit-on-
+  // generate effect and the FIT button to measure actual available width,
+  // not viewport width (the grid lives inside a max-w-5xl container that's
+  // narrower than the window on desktop).
+  const gridPanelRef = useRef(null);
   const [themeKey, setThemeKey] = useState('soapOpera');
   const [difficulty, setDifficulty] = useState('medium');
   const [sampleCount, setSampleCount] = useState(10);
@@ -1574,7 +1580,25 @@ export default function App() {
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [showSolution, setShowSolution] = useState(false);
   const [showTrace, setShowTrace] = useState(false);
+  const [showOptimalTrace, setShowOptimalTrace] = useState(false);
   const [generating, setGenerating] = useState(false);
+
+  // Whenever a new puzzle is loaded, measure the actual grid panel width
+  // and snap zoom to it (capped at 3×). useLayoutEffect runs after the DOM
+  // is updated but before paint, so the user never sees a wrong-zoom flash.
+  useLayoutEffect(() => {
+    if (!puzzle || !gridPanelRef.current) return;
+    // Measure the actual rendered table element. We can't use the wrap's
+    // scrollWidth because when the grid fits, the wrap clamps to its
+    // parent's content area, so the measurement no longer reflects the
+    // grid's true size — and the ratio would shrink every click.
+    // The table itself doesn't overflow-clamp; offsetWidth is its real
+    // rendered width including its outer border.
+    const table = gridPanelRef.current.querySelector('.sc-table');
+    if (!table || table.offsetWidth === 0) return;
+    const available = gridPanelRef.current.clientWidth - 54;
+    setGridZoom((prev) => Math.min((available / table.offsetWidth) * prev, 3));
+  }, [puzzle]);
 
   // Grid state: keyed by canonKey, value = { catA, a, catB, b, committed: 'x'|'check'|null, scratch: string|null }.
   // Coordinates stored inline so we never have to decode canonKey to iterate.
@@ -1613,6 +1637,7 @@ export default function App() {
     setGenerating(true);
     setShowSolution(false);
     setShowTrace(false);
+    setShowOptimalTrace(false);
     setGridState({});
     setHint(null);
     setVerifyResult(null);
@@ -1647,16 +1672,6 @@ export default function App() {
         setPuzzle(accum[0]);
         setCandidates(accum);
         setGenerating(false);
-        // Snap zoom to fit-the-viewport. Grid base width is roughly
-        //   cat-row + row-label + (numCats-1) cat columns × numItems cells × cell-base.
-        // Pick the largest preset that still fits horizontally, capped at 3×.
-        const nC = Object.keys(accum[0].categories).length;
-        const nI = accum[0].categories[Object.keys(accum[0].categories)[0]].length;
-        const baseW = 14 + 44 + (nC - 1) * nI * 18;
-        const available = (typeof window !== 'undefined' ? window.innerWidth : 600) - 60;
-        const fit = available / baseW;
-        const chosenZoom = [...ZOOM_STEPS].reverse().find((z) => z <= fit) || ZOOM_STEPS[0];
-        setGridZoom(chosenZoom);
       }
     };
     setTimeout(step, 30);
@@ -1833,7 +1848,9 @@ export default function App() {
   };
   const runVerify = () => {
     if (!puzzle) return;
-    setVerifyResult(verifyMarks(puzzle, gridState));
+    const result = verifyMarks(puzzle, gridState);
+    result.nonce = Date.now();
+    setVerifyResult(result);
     setHint(null);
   };
 
@@ -2237,6 +2254,12 @@ export default function App() {
         /* Unified staircase table */
         .sc-table {
           border-collapse: collapse;
+          /* Center within the wrap so any leftover horizontal slack (after
+             FIT or auto-fit) splits evenly on both sides. When the grid
+             overflows the wrap, margin:auto collapses to 0 and the wrap's
+             overflow-x: auto handles scrolling. */
+          margin-left: auto;
+          margin-right: auto;
           font-family: 'JetBrains Mono', monospace;
           /* All grid dimensions derive from these two vars so zoom is one knob. */
           --grid-zoom: 1;
@@ -2263,13 +2286,15 @@ export default function App() {
         .sc-table td.sc-td, .sc-table td.sc-empty { line-height: 0; vertical-align: top; }
         .sc-corner {
           background: transparent;
-          /* Bracket the upper-left corner area so the row+col header runs
-             meet at a clean inside corner instead of fading into nothing.
-             border-right matches the row-label right edge (#8a7960); the
-             second row's bottom matches the col-label bottom edge. */
+          /* Right border on BOTH corner cells, merging into a single
+             continuous vertical line down the right edge of the corner
+             area (where row labels begin). */
           border-right: 1px solid #8a7960;
-          border-bottom: 1px solid #8a7960;
         }
+        /* Only the bottom corner cell carries the horizontal closing line —
+           the top one must not, or a stray horizontal line appears INSIDE
+           the corner area between the two rows of the header. */
+        .sc-corner-bottom { border-bottom: 1px solid #8a7960; }
         .sc-cat-col {
           padding: 2px 3px;
           border-bottom: 1px solid #8a7960;
@@ -2357,11 +2382,18 @@ export default function App() {
           font-size: 16px;
           cursor: pointer;
           line-height: 1;
+          padding: 0;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
         }
         .zoom-ctrl button:disabled { color: #b8a48a; cursor: not-allowed; }
         .zoom-fit-btn {
+          /* Wider button for "FIT" text. Inherits flex centering from .zoom-ctrl button. */
+          width: auto !important;
+          min-width: 32px;
           padding: 0 8px !important;
-          font-size: 11px !important;
+          font-size: 10px !important;
           letter-spacing: 0.1em;
           text-transform: uppercase;
           color: #1f1a14;
@@ -2551,16 +2583,6 @@ export default function App() {
                         <span className="tool-glyph">··</span>
                         <span className="tool-name">scratch</span>
                       </button>
-                      {tool === 'scratch' && (
-                        <span className="text-[10px] ink-faded italic ml-2">
-                          tap a cell to label · tap an existing label to edit
-                        </span>
-                      )}
-                      {turnLocked && tool !== 'scratch' && (
-                        <span className="text-[10px] ink-red italic ml-2">
-                          locked to {tool === 'x' ? '✕' : '✓'} this turn — switching ends it
-                        </span>
-                      )}
                     </div>
                   );
                 })()}
@@ -2576,7 +2598,7 @@ export default function App() {
 
                 {/* Hint / verify result */}
                 {verifyResult && (
-                  <div className="pin-card p-3 mb-3 hint-result">
+                  <div key={verifyResult.nonce} className="pin-card p-3 mb-3 hint-result hint-flash">
                     {verifyResult.status === 'all-consistent' ? (
                       <div className="ink text-sm">
                         <span className="stamp text-[10px] mr-2">VERIFIED</span>
@@ -2598,39 +2620,39 @@ export default function App() {
 
                 <Legend categories={puzzle.categories} anchorKey={puzzle.anchorKey} />
                 <ClueScroll clues={puzzle.clues} theme={theme} />
-                <div className="mt-3 pin-card p-3">
+                <div ref={gridPanelRef} className="mt-3 pin-card p-3">
                   <div className="flex items-center justify-end mb-2 gap-2">
                     <div className="zoom-ctrl">
                       <button
                         onClick={() => {
-                          const i = ZOOM_STEPS.indexOf(gridZoom);
-                          if (i > 0) setGridZoom(ZOOM_STEPS[i - 1]);
+                          // Coarse step down: largest preset strictly less than current.
+                          const prev = [...ZOOM_STEPS].reverse().find((z) => z < gridZoom);
+                          if (prev !== undefined) setGridZoom(prev);
                         }}
-                        disabled={gridZoom === ZOOM_STEPS[0]}
+                        disabled={gridZoom <= ZOOM_STEPS[0]}
                         aria-label="zoom out"
                       >−</button>
-                      <span className="zoom-label">{gridZoom}×</span>
+                      <span className="zoom-label">{(+gridZoom.toFixed(2))}×</span>
                       <button
                         onClick={() => {
-                          const i = ZOOM_STEPS.indexOf(gridZoom);
-                          if (i < ZOOM_STEPS.length - 1) setGridZoom(ZOOM_STEPS[i + 1]);
+                          // Coarse step up: smallest preset strictly greater than current.
+                          const next = ZOOM_STEPS.find((z) => z > gridZoom);
+                          if (next !== undefined) setGridZoom(next);
                         }}
-                        disabled={gridZoom === ZOOM_STEPS[ZOOM_STEPS.length - 1]}
+                        disabled={gridZoom >= ZOOM_STEPS[ZOOM_STEPS.length - 1]}
                         aria-label="zoom in"
                       >+</button>
                       <button
                         className="zoom-fit-btn"
                         onClick={() => {
-                          const nC = Object.keys(puzzle.categories).length;
-                          const nI = puzzle.categories[Object.keys(puzzle.categories)[0]].length;
-                          const baseW = 14 + 44 + (nC - 1) * nI * 18;
-                          const available = window.innerWidth - 60;
-                          const fit = available / baseW;
-                          const chosen = [...ZOOM_STEPS].reverse().find((z) => z <= fit) || ZOOM_STEPS[0];
-                          setGridZoom(chosen);
+                          if (!gridPanelRef.current) return;
+                          const table = gridPanelRef.current.querySelector('.sc-table');
+                          if (!table || table.offsetWidth === 0) return;
+                          const available = gridPanelRef.current.clientWidth - 54;
+                          setGridZoom((prev) => Math.min((available / table.offsetWidth) * prev, 3));
                         }}
                         aria-label="fit to width"
-                        title="fit grid to viewport width"
+                        title="fit grid to panel width"
                       >fit</button>
                     </div>
                   </div>
@@ -2669,12 +2691,15 @@ export default function App() {
 
               {/* Solution toggle */}
               <section>
-                <div className="flex gap-2 mb-3">
+                <div className="flex gap-2 mb-3 flex-wrap">
                   <button className={`ctrl-btn ${showSolution ? 'active' : ''}`} onClick={() => setShowSolution((s) => !s)}>
                     {showSolution ? 'hide solution' : 'reveal solution'}
                   </button>
+                  <button className={`ctrl-btn ${showOptimalTrace ? 'active' : ''}`} onClick={() => setShowOptimalTrace((s) => !s)}>
+                    {showOptimalTrace ? 'hide optimal trace' : 'show optimal trace'}
+                  </button>
                   <button className={`ctrl-btn ${showTrace ? 'active' : ''}`} onClick={() => setShowTrace((s) => !s)}>
-                    {showTrace ? 'hide trace' : 'show deduction trace'}
+                    {showTrace ? 'hide full trace' : 'show full trace'}
                   </button>
                 </div>
 
@@ -2698,6 +2723,12 @@ export default function App() {
                         ))}
                       </tbody>
                     </table>
+                  </div>
+                )}
+
+                {showOptimalTrace && (
+                  <div className="pin-card p-4 mt-3 max-h-96 overflow-y-auto">
+                    <OptimalTraceView puzzle={puzzle} theme={theme} />
                   </div>
                 )}
 
@@ -3122,14 +3153,91 @@ function TraceView({ puzzle, theme }) {
         <div key={i}>
           <div className="ink-red font-bold tracking-widest text-[10px] uppercase mb-1.5">Pass {g.pass} · {g.items.length} derivations</div>
           <ul className="space-y-1 pl-2">
-            {g.items.slice(0, 30).map((f, j) => (
+            {g.items.map((f, j) => (
               <li key={j} className="ink flex gap-2">
                 <span className="ink-faded shrink-0 w-32 truncate">[{fmtSource(f.source).slice(0, 30)}]</span>
                 <span>{fmtFact(f)}</span>
               </li>
             ))}
-            {g.items.length > 30 && <li className="ink-faded italic">…{g.items.length - 30} more</li>}
           </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Compact view of the load-bearing deductions only: filters out the
+// exclusivity cascades that just fill in ✕s once a ✓ is placed. What's left
+// is the clue-driven facts plus the cross-category bridges (transitivity)
+// and the by-elimination steps (last-option) — the actual proof skeleton.
+function OptimalTraceView({ puzzle, theme }) {
+  const INFORMATIVE = new Set(['clue', 'transitivity', 'last-option']);
+  const groups = [];
+  let cur = null;
+  for (const t of puzzle.trace) {
+    if (t.marker === 'pass-start') {
+      if (cur && cur.items.length) groups.push(cur);
+      cur = { pass: t.pass, items: [] };
+    } else if (cur && t.source && INFORMATIVE.has(t.source.type)) {
+      cur.items.push(t);
+    }
+  }
+  if (cur && cur.items.length) groups.push(cur);
+
+  const totalKept = groups.reduce((n, g) => n + g.items.length, 0);
+  const totalRaw = puzzle.trace.filter((t) => !t.marker).length;
+
+  return (
+    <div className="space-y-3 text-xs">
+      <div className="ink-faded italic text-[11px]">
+        Showing the {totalKept} load-bearing steps out of {totalRaw} total
+        derivations. The {totalRaw - totalKept} hidden steps are exclusivity
+        cascades — automatic ✕s that follow once a ✓ is placed in the same
+        row or column.
+      </div>
+      {groups.map((g, i) => (
+        <div key={i}>
+          <div className="ink-red font-bold tracking-widest text-[10px] uppercase mb-1.5">
+            Pass {g.pass} · {g.items.length} step{g.items.length === 1 ? '' : 's'}
+          </div>
+          <ol className="space-y-1.5 pl-4 list-decimal marker:ink-faded">
+            {g.items.map((f, j) => {
+              const s = f.source;
+              if (s.type === 'clue') {
+                return (
+                  <li key={j} className="ink leading-snug">
+                    <span className="ink-faded">By clue:</span>{' '}
+                    <em>"{theme.renderClue(s.clue)}"</em>{' '}
+                    <span className="ink-faded">⇒</span>{' '}
+                    <strong>{factSentence(f, theme)}</strong>
+                  </li>
+                );
+              }
+              if (s.type === 'last-option') {
+                return (
+                  <li key={j} className="ink leading-snug">
+                    <span className="ink-faded">By elimination:</span>{' '}
+                    <strong>{factSentence(f, theme)}</strong>
+                  </li>
+                );
+              }
+              // transitivity — show the parent pair if available
+              const parents = [s.from, ...(s.deps || [])].filter(Boolean);
+              return (
+                <li key={j} className="ink leading-snug">
+                  <span className="ink-faded">By transitivity:</span>{' '}
+                  {parents.map((p, k) => (
+                    <span key={k}>
+                      {k > 0 ? ' + ' : ''}
+                      <em>{factSentence(p, theme)}</em>
+                    </span>
+                  ))}{' '}
+                  <span className="ink-faded">⇒</span>{' '}
+                  <strong>{factSentence(f, theme)}</strong>
+                </li>
+              );
+            })}
+          </ol>
         </div>
       ))}
     </div>
@@ -3205,7 +3313,7 @@ function StaircaseGrid({ puzzle, gridState, onTap, scratchMode, activeTool, zoom
         <thead>
           {/* Row 1: category names spanning their item columns. */}
           <tr>
-            <th colSpan={2} className="sc-corner"></th>
+            <th colSpan={2} className="sc-corner sc-corner-top"></th>
             {colCats.map((catCol, idx) => (
               <th
                 key={catCol}
@@ -3218,7 +3326,7 @@ function StaircaseGrid({ puzzle, gridState, onTap, scratchMode, activeTool, zoom
           </tr>
           {/* Row 2: per-item column labels (rotated vertically). */}
           <tr>
-            <th colSpan={2} className="sc-corner"></th>
+            <th colSpan={2} className="sc-corner sc-corner-bottom"></th>
             {colCats.flatMap((catCol, catIdx) =>
               categories[catCol].map((item, idx) => (
                 <th
