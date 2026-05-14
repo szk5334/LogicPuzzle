@@ -19,8 +19,8 @@ function shuffle(arr) {
 // A solution is an array of N row-objects, each mapping category -> item.
 // The anchor category (e.g. seat position) is in its natural order; the
 // others are random bijections onto it.
-function generateSolution(theme, n) {
-  const categories = theme.categoriesFor(n);
+function generateSolution(theme, numCategories, numItems) {
+  const categories = theme.categoriesFor(numCategories, numItems);
   const anchorKey = theme.anchorKey;
   const anchor = categories[anchorKey];
   const solution = anchor.map((a) => ({ [anchorKey]: a }));
@@ -787,8 +787,8 @@ function solveWithClues(categories, clues, trace) {
 }
 
 // ----- Generate a puzzle -----
-function generatePuzzle(theme, n, difficulty) {
-  const { categories, solution, anchorKey, subjectKey } = generateSolution(theme, n);
+function generatePuzzle(theme, numCategories, numItems, difficulty) {
+  const { categories, solution, anchorKey, subjectKey } = generateSolution(theme, numCategories, numItems);
   const allClues = generateAllTrueClues({ categories, solution, anchorKey });
 
   // Bias the clue ordering by difficulty. Each type gets a base weight per band.
@@ -1124,7 +1124,7 @@ function hintTier1(puzzle, gridState) {
   const result = solveFromState(puzzle.categories, puzzle.clues, marks, trace);
 
   if (result.status === 'contradiction') {
-    return { tier: 1, contradiction: true, ...verifyMarks(puzzle, gridState) };
+    return { tier: 2, contradiction: true, ...verifyMarks(puzzle, gridState) };
   }
 
   // Walk trace post-mark-seed for the first fact whose DAG reaches a clue.
@@ -1137,14 +1137,14 @@ function hintTier1(puzzle, gridState) {
     if (chainTerminusType(t) === 'clue') {
       const dag = buildProofDag(t);
       const originClue = dag.find((s) => s.kind === 'clue')?.clue;
-      return { tier: 1, fact: t, originClue, dag };
+      return { tier: 2, fact: t, originClue, dag };
     }
   }
   // No clue-driven progress reachable. If the player has wrong marks,
   // route to verify instead of the generic noProgress message.
   const verify = verifyMarks(puzzle, gridState);
-  if (verify.count > 0) return { tier: 1, wrongMarks: true, ...verify };
-  return { tier: 1, noProgress: true };
+  if (verify.count > 0) return { tier: 2, wrongMarks: true, ...verify };
+  return { tier: 2, noProgress: true };
 }
 
 // Tier 2: full proof DAG for a focus cell. If no focus cell supplied, picks the same
@@ -1155,7 +1155,7 @@ function hintTier2(puzzle, gridState, focusCell) {
   const result = solveFromState(puzzle.categories, puzzle.clues, marks, trace);
 
   if (result.status === 'contradiction') {
-    return { tier: 2, contradiction: true, ...verifyMarks(puzzle, gridState) };
+    return { tier: 3, contradiction: true, ...verifyMarks(puzzle, gridState) };
   }
 
   let target = null;
@@ -1165,7 +1165,7 @@ function hintTier2(puzzle, gridState, focusCell) {
       ((t.catA === focusCell.catA && t.a === focusCell.a && t.catB === focusCell.catB && t.b === focusCell.b) ||
        (t.catA === focusCell.catB && t.a === focusCell.b && t.catB === focusCell.catA && t.b === focusCell.a))
     );
-    if (!target) return { tier: 2, focusUnreachable: true };
+    if (!target) return { tier: 3, focusUnreachable: true };
   } else {
     // Pass A: first clue-driven fact (post mark-seed phase).
     let inMarkSeed = false;
@@ -1197,13 +1197,13 @@ function hintTier2(puzzle, gridState, focusCell) {
     // to verify. Otherwise truly stuck.
     if (!target) {
       const verify = verifyMarks(puzzle, gridState);
-      if (verify.count > 0) return { tier: 2, wrongMarks: true, ...verify };
-      return { tier: 2, noProgress: true };
+      if (verify.count > 0) return { tier: 3, wrongMarks: true, ...verify };
+      return { tier: 3, noProgress: true };
     }
   }
 
   const dag = buildProofDag(target);
-  return { tier: 2, fact: target, dag };
+  return { tier: 3, fact: target, dag };
 }
 
 // Tier 3: confirm the puzzle is still solvable from current marks. Three outcomes:
@@ -1215,9 +1215,9 @@ function hintTier3(puzzle, gridState) {
   const result = solveFromState(puzzle.categories, puzzle.clues, marks, null);
 
   if (result.status === 'contradiction') {
-    return { tier: 3, contradiction: true, ...verifyMarks(puzzle, gridState) };
+    return { tier: 1, contradiction: true, ...verifyMarks(puzzle, gridState) };
   }
-  return { tier: 3, status: result.status, passes: result.passes };
+  return { tier: 1, status: result.status, passes: result.passes };
 }
 
 // ============================================================
@@ -1225,7 +1225,7 @@ function hintTier3(puzzle, gridState) {
 // ============================================================
 
 const CHARACTER_POOL = ['Marisol', 'Dax', 'Yuki', 'Cordelia', 'Renard', 'Imani', 'Felix', 'Odette'];
-const DRINK_POOL = ['martini', 'cabernet', 'whiskey', 'champagne', 'absinthe', 'mezcal'];
+const DRINK_POOL = ['martini', 'cabernet', 'whiskey', 'champagne', 'absinthe', 'mezcal', 'gin'];
 const SECRET_POOL = [
   'an affair with the host',
   'embezzlement at the firm',
@@ -1233,13 +1233,31 @@ const SECRET_POOL = [
   'a secret second family',
   'a stolen manuscript',
   'a buried prior identity',
+  'a fugitive past',
 ];
-const OBJECT_POOL = ['silver locket', 'matchbook', 'lipstick-stained napkin', 'torn letter', 'pearl earring', 'antique pen'];
+const RUMOR_POOL = [
+  'leaving town',
+  'inheriting everything',
+  'broke',
+  'dating the host',
+  'planning revenge',
+  'secretly engaged',
+  'in a long feud',
+];
+const OBJECT_POOL = ['silver locket', 'matchbook', 'lipstick-stained napkin', 'torn letter', 'pearl earring', 'antique pen', 'gold cufflink'];
+const MOTIVE_POOL = ['jealousy', 'revenge', 'greed', 'shame', 'ambition', 'fear', 'pride'];
+const WEAPON_POOL = ['the revolver', 'the dagger', 'the rope', 'the poison', 'the candlestick', 'the lead pipe', 'the wrench'];
+const ALIBI_POOL = ['at the office', 'on a date', 'asleep at home', 'in court', 'at the gym', 'visiting family', 'at the theater'];
+const GIFT_POOL = ['white roses', 'a bottle of port', 'a silk scarf', 'a vintage book', 'a pearl necklace', 'a handwritten note', 'a chocolate box'];
+const ATTIRE_POOL = ['black tie', 'a velvet jacket', 'a sequined dress', 'a silk gown', 'a tweed suit', 'a feathered hat', 'an emerald brooch'];
 
-const LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
-const NUMERALS = ['I', 'II', 'III', 'IV', 'V', 'VI'];
-const SHAPES = ['◯', '△', '□', '◇', '☆', '✕'];
-const COLORS = ['red', 'blue', 'green', 'gold', 'violet', 'white'];
+const LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
+const NUMERALS = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
+const SHAPES = ['◯', '△', '□', '◇', '☆', '✕', '▽'];
+const COLORS = ['red', 'blue', 'green', 'gold', 'violet', 'white', 'silver'];
+const TONES = ['α', 'β', 'γ', 'δ', 'ε', 'ζ', 'η'];
+const SYMBOLS = ['♠', '♥', '♦', '♣', '★', '♪', '☼'];
+const ACCENTS = ['¹', '²', '³', '⁴', '⁵', '⁶', '⁷'];
 
 // Shared clue-rendering. Each theme provides small primitives (phrase, propLine,
 // renderNextTo, renderImmLeft); the shared function handles every clue type.
@@ -1309,21 +1327,34 @@ const themes = {
     label: 'Classic — letters & numerals',
     anchorKey: 'position',
     subjectKey: 'letter',
-    categoriesFor(n) {
-      return {
-        position: Array.from({ length: n }, (_, i) => i + 1),
-        letter: LETTERS.slice(0, n),
-        numeral: NUMERALS.slice(0, n),
-        shape: SHAPES.slice(0, n),
+    categoriesFor(numCats, numItems) {
+      // Priority order: anchor → subject → fillers. Take first numCats slots,
+      // each populated with numItems items.
+      const all = {
+        position: () => Array.from({ length: numItems }, (_, i) => i + 1),
+        letter:   () => LETTERS.slice(0, numItems),
+        numeral:  () => NUMERALS.slice(0, numItems),
+        shape:    () => SHAPES.slice(0, numItems),
+        tone:     () => TONES.slice(0, numItems),
+        symbol:   () => SYMBOLS.slice(0, numItems),
+        accent:   () => ACCENTS.slice(0, numItems),
       };
+      const order = ['position', 'letter', 'numeral', 'shape', 'tone', 'symbol', 'accent'];
+      const out = {};
+      for (let i = 0; i < numCats; i++) out[order[i]] = all[order[i]]();
+      return out;
     },
-    prompt: 'Determine which letter, numeral, and shape go at each position.',
+    prompt: 'Determine which letter, numeral, shape, and tone go at each position.',
     phrase(cat, x) { return `${cat[0].toUpperCase()}=${x}`; },
     factPhrasing(subj, attrs) {
-      const position = attrs.position != null ? `position ${attrs.position}` : '_____';
-      const numeral = attrs.numeral ?? '_____';
-      const shape = attrs.shape ?? '_____';
-      return `${subj} pairs with ${numeral} and ${shape}, at ${position}.`;
+      const parts = [];
+      if ('numeral'  in attrs) parts.push(attrs.numeral  ?? '_____');
+      if ('shape'    in attrs) parts.push(attrs.shape    ?? '_____');
+      if ('tone'     in attrs) parts.push(attrs.tone     ?? '_____');
+      if ('symbol'   in attrs) parts.push(attrs.symbol   ?? '_____');
+      if ('accent'   in attrs) parts.push(attrs.accent   ?? '_____');
+      if ('position' in attrs) parts.push(attrs.position != null ? `position ${attrs.position}` : '_____');
+      return parts.length ? `${subj} pairs with ${parts.join(', ')}.` : `${subj}.`;
     },
     propLine(catA, a, catB, b, polarity) {
       const op = polarity === 'yes' ? '↔' : '⊥';
@@ -1355,13 +1386,20 @@ const themes = {
     label: 'Soap Opera — the dinner party',
     anchorKey: 'seat',
     subjectKey: 'guest',
-    categoriesFor(n) {
-      return {
-        seat: Array.from({ length: n }, (_, i) => i + 1),
-        guest: shuffle(CHARACTER_POOL).slice(0, n),
-        drink: shuffle(DRINK_POOL).slice(0, n),
-        secret: shuffle(SECRET_POOL).slice(0, n),
+    categoriesFor(numCats, numItems) {
+      const all = {
+        seat:   () => Array.from({ length: numItems }, (_, i) => i + 1),
+        guest:  () => shuffle(CHARACTER_POOL).slice(0, numItems),
+        drink:  () => shuffle(DRINK_POOL).slice(0, numItems),
+        secret: () => shuffle(SECRET_POOL).slice(0, numItems),
+        rumor:  () => shuffle(RUMOR_POOL).slice(0, numItems),
+        gift:   () => shuffle(GIFT_POOL).slice(0, numItems),
+        attire: () => shuffle(ATTIRE_POOL).slice(0, numItems),
       };
+      const order = ['seat', 'guest', 'drink', 'secret', 'rumor', 'gift', 'attire'];
+      const out = {};
+      for (let i = 0; i < numCats; i++) out[order[i]] = all[order[i]]();
+      return out;
     },
     prompt: 'Reconstruct what the gossip means: who sat where, what they drank, and what they were hiding.',
     phrase(cat, x) {
@@ -1369,13 +1407,20 @@ const themes = {
       if (cat === 'guest') return x;
       if (cat === 'drink') return `the ${x} drinker`;
       if (cat === 'secret') return `whoever was hiding ${x}`;
+      if (cat === 'rumor') return `whoever was rumored ${x}`;
+      if (cat === 'gift') return `whoever brought ${x}`;
+      if (cat === 'attire') return `whoever wore ${x}`;
       return `${cat}=${x}`;
     },
     factPhrasing(subj, attrs) {
-      const seat = attrs.seat != null ? `seat ${attrs.seat}` : '_____';
-      const drink = attrs.drink ?? '_____';
-      const secret = attrs.secret ?? '_____';
-      return `${subj} sat at ${seat}, drank the ${drink}, and was hiding ${secret}.`;
+      const parts = [];
+      if ('drink'  in attrs) parts.push(`drank the ${attrs.drink ?? '_____'}`);
+      if ('secret' in attrs) parts.push(`was hiding ${attrs.secret ?? '_____'}`);
+      if ('rumor'  in attrs) parts.push(`was rumored ${attrs.rumor ?? '_____'}`);
+      if ('gift'   in attrs) parts.push(`brought ${attrs.gift ?? '_____'}`);
+      if ('attire' in attrs) parts.push(`wore ${attrs.attire ?? '_____'}`);
+      if ('seat'   in attrs) parts.push(`sat at ${attrs.seat != null ? `seat ${attrs.seat}` : '_____'}`);
+      return parts.length ? `${subj} ${parts.join(', ')}.` : `${subj}.`;
     },
     propLine(catA, a, catB, b, polarity) {
       // Special phrasing when seat is involved (positional).
@@ -1417,27 +1462,41 @@ const themes = {
     label: 'Noir — the suspects',
     anchorKey: 'room',
     subjectKey: 'suspect',
-    categoriesFor(n) {
-      return {
-        room: Array.from({ length: n }, (_, i) => i + 1),
-        suspect: shuffle(CHARACTER_POOL).slice(0, n),
-        evidence: shuffle(OBJECT_POOL).slice(0, n),
-        color: shuffle(COLORS).slice(0, n),
+    categoriesFor(numCats, numItems) {
+      const all = {
+        room:     () => Array.from({ length: numItems }, (_, i) => i + 1),
+        suspect:  () => shuffle(CHARACTER_POOL).slice(0, numItems),
+        evidence: () => shuffle(OBJECT_POOL).slice(0, numItems),
+        color:    () => shuffle(COLORS).slice(0, numItems),
+        motive:   () => shuffle(MOTIVE_POOL).slice(0, numItems),
+        weapon:   () => shuffle(WEAPON_POOL).slice(0, numItems),
+        alibi:    () => shuffle(ALIBI_POOL).slice(0, numItems),
       };
+      const order = ['room', 'suspect', 'evidence', 'color', 'motive', 'weapon', 'alibi'];
+      const out = {};
+      for (let i = 0; i < numCats; i++) out[order[i]] = all[order[i]]();
+      return out;
     },
-    prompt: 'Pin each suspect to a room, the evidence they left, and the color they wore.',
+    prompt: 'Pin each suspect to a room, the evidence they left, the color they wore, and the motive that drove them.',
     phrase(cat, x) {
       if (cat === 'room') return `room ${x}`;
       if (cat === 'suspect') return x;
       if (cat === 'evidence') return `the one who left the ${x}`;
       if (cat === 'color') return `the one in ${x}`;
+      if (cat === 'motive') return `the one driven by ${x}`;
+      if (cat === 'weapon') return `whoever used ${x}`;
+      if (cat === 'alibi') return `whoever claimed to be ${x}`;
       return `${cat}=${x}`;
     },
     factPhrasing(subj, attrs) {
-      const room = attrs.room != null ? `room ${attrs.room}` : '_____';
-      const evidence = attrs.evidence ?? '_____';
-      const color = attrs.color ?? '_____';
-      return `${subj} wore ${color}, left ${evidence}, and was in ${room}.`;
+      const parts = [];
+      if ('color'    in attrs) parts.push(`wore ${attrs.color ?? '_____'}`);
+      if ('evidence' in attrs) parts.push(`left the ${attrs.evidence ?? '_____'}`);
+      if ('motive'   in attrs) parts.push(`was driven by ${attrs.motive ?? '_____'}`);
+      if ('weapon'   in attrs) parts.push(`used ${attrs.weapon ?? '_____'}`);
+      if ('alibi'    in attrs) parts.push(`claimed to be ${attrs.alibi ?? '_____'}`);
+      if ('room'     in attrs) parts.push(`was in ${attrs.room != null ? `room ${attrs.room}` : '_____'}`);
+      return parts.length ? `${subj} ${parts.join(', ')}.` : `${subj}.`;
     },
     propLine(catA, a, catB, b, polarity) {
       if (catA === 'room' || catB === 'room') {
@@ -1505,7 +1564,8 @@ function shortLabel(s, maxLen = 7) {
 // ============================================================
 
 export default function App() {
-  const [size, setSize] = useState(4);
+  const [numCategories, setNumCategories] = useState(4);
+  const [numItems, setNumItems] = useState(4);
   const [themeKey, setThemeKey] = useState('soapOpera');
   const [difficulty, setDifficulty] = useState('medium');
   const [sampleCount, setSampleCount] = useState(10);
@@ -1567,7 +1627,7 @@ export default function App() {
     let i = 0;
     const step = () => {
       try {
-        const p = generatePuzzle(theme, size, difficulty);
+        const p = generatePuzzle(theme, numCategories, numItems, difficulty);
         if (p.status === 'solved') {
           p._score = scoreInterestingness(p);
           p.par = computePar(p);
@@ -1587,6 +1647,16 @@ export default function App() {
         setPuzzle(accum[0]);
         setCandidates(accum);
         setGenerating(false);
+        // Snap zoom to fit-the-viewport. Grid base width is roughly
+        //   cat-row + row-label + (numCats-1) cat columns × numItems cells × cell-base.
+        // Pick the largest preset that still fits horizontally, capped at 3×.
+        const nC = Object.keys(accum[0].categories).length;
+        const nI = accum[0].categories[Object.keys(accum[0].categories)[0]].length;
+        const baseW = 14 + 44 + (nC - 1) * nI * 18;
+        const available = (typeof window !== 'undefined' ? window.innerWidth : 600) - 60;
+        const fit = available / baseW;
+        const chosenZoom = [...ZOOM_STEPS].reverse().find((z) => z <= fit) || ZOOM_STEPS[0];
+        setGridZoom(chosenZoom);
       }
     };
     setTimeout(step, 30);
@@ -1745,13 +1815,19 @@ export default function App() {
     setLastCommittedTool(null);
   };
 
-  // Hint actions
+  // Hint actions. Button tier numbers map to:
+  //   1 → solvable?   (hintTier3 — yes/no/contradiction)
+  //   2 → next step   (hintTier1 — first clue-driven fact)
+  //   3 → proof       (hintTier2 — full DAG to next fact)
+  // The nonce forces React to treat each click as a fresh result even when
+  // the underlying answer is unchanged, so the hint card visibly re-fires.
   const runHint = (tier) => {
     if (!puzzle) return;
     let result;
-    if (tier === 1) result = hintTier1(puzzle, gridState);
-    else if (tier === 2) result = hintTier2(puzzle, gridState, null);
-    else result = hintTier3(puzzle, gridState);
+    if (tier === 1) result = hintTier3(puzzle, gridState);
+    else if (tier === 2) result = hintTier1(puzzle, gridState);
+    else result = hintTier2(puzzle, gridState, null);
+    result.nonce = Date.now();
     setHint(result);
     setVerifyResult(null);
   };
@@ -1931,6 +2007,23 @@ export default function App() {
           color: #f4ecdc;
           border-color: #1f1a14;
         }
+        .ctrl-select {
+          padding: 6px 10px;
+          border: 1px solid #8a7960;
+          background: #f4ecdc;
+          color: #1f1a14;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 13px;
+          letter-spacing: 0.08em;
+          cursor: pointer;
+          appearance: none;
+          -webkit-appearance: none;
+          padding-right: 24px;
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath fill='%231f1a14' d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
+          background-repeat: no-repeat;
+          background-position: right 8px center;
+          background-size: 8px;
+        }
         /* Tool palette buttons */
         .tool-btn {
           font-family: 'JetBrains Mono', monospace;
@@ -2021,6 +2114,11 @@ export default function App() {
         .scratch-input:focus { border-color: #1f1a14; }
         /* Hint result styling */
         .hint-result { font-family: 'JetBrains Mono', monospace; }
+        @keyframes hint-fade-in {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+        .hint-flash { animation: hint-fade-in 0.18s ease-out; }
         .hint-result .hint-tag {
           display: inline-block;
           font-size: 9px;
@@ -2113,6 +2211,13 @@ export default function App() {
           font-family: 'JetBrains Mono', monospace;
           color: #1f1a14;
         }
+        /* Inside the staircase grid, label fonts scale with the zoom knob so
+           vertical column labels and category headers grow alongside the
+           cells. The standalone .vlabel above keeps its fixed size for any
+           other place it's used. */
+        .sc-table .vlabel { font-size: calc(10px * var(--grid-zoom)); }
+        .sc-table .sc-cat-col .cat-tag,
+        .sc-table .sc-cat-row .cat-tag { font-size: calc(9px * var(--grid-zoom)); letter-spacing: 0.15em; }
         .rlabel {
           font-size: 11px;
           font-family: 'JetBrains Mono', monospace;
@@ -2143,6 +2248,13 @@ export default function App() {
           --col-h: calc(var(--col-label-base) * var(--grid-zoom));
           --row-w: calc(var(--row-label-base) * var(--grid-zoom));
           --cat-row-w: calc(var(--cat-row-base) * var(--grid-zoom));
+          /* Framed-evidence-board look: a dark outer outline, a thin inner
+             keyline of paper, and a soft drop shadow. */
+          border: 2px solid #4a3a26;
+          outline: 1px solid #d8c9a0;
+          outline-offset: -5px;
+          box-shadow: 0 2px 6px rgba(60,40,20,0.18), 0 0 0 4px #f4ecdc inset;
+          background: #f4ecdc;
         }
         .sc-table th, .sc-table td { padding: 0; margin: 0; }
         /* Cells that hold the clickable button (or are empty staircase voids):
@@ -2151,7 +2263,12 @@ export default function App() {
         .sc-table td.sc-td, .sc-table td.sc-empty { line-height: 0; vertical-align: top; }
         .sc-corner {
           background: transparent;
-          border: none;
+          /* Bracket the upper-left corner area so the row+col header runs
+             meet at a clean inside corner instead of fading into nothing.
+             border-right matches the row-label right edge (#8a7960); the
+             second row's bottom matches the col-label bottom edge. */
+          border-right: 1px solid #8a7960;
+          border-bottom: 1px solid #8a7960;
         }
         .sc-cat-col {
           padding: 2px 3px;
@@ -2242,6 +2359,13 @@ export default function App() {
           line-height: 1;
         }
         .zoom-ctrl button:disabled { color: #b8a48a; cursor: not-allowed; }
+        .zoom-fit-btn {
+          padding: 0 8px !important;
+          font-size: 11px !important;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+          color: #1f1a14;
+        }
         .zoom-ctrl .zoom-label {
           font-family: 'JetBrains Mono', monospace;
           font-size: 11px;
@@ -2277,14 +2401,28 @@ export default function App() {
             <div className="text-xs ink-faded tracking-[0.25em] uppercase mb-3">Parameters</div>
             <div className="flex flex-wrap gap-6">
               <div>
-                <div className="text-[11px] ink-faded uppercase tracking-widest mb-1.5">Size</div>
-                <div className="flex gap-1">
-                  {[3, 4, 5].map((n) => (
-                    <button key={n} className={`ctrl-btn ${size === n ? 'active' : ''}`} onClick={() => setSize(n)}>
-                      {n}×{n}
-                    </button>
+                <div className="text-[11px] ink-faded uppercase tracking-widest mb-1.5">Categories</div>
+                <select
+                  className="ctrl-select"
+                  value={numCategories}
+                  onChange={(e) => setNumCategories(parseInt(e.target.value, 10))}
+                >
+                  {[3, 4, 5, 6, 7].map((n) => (
+                    <option key={n} value={n}>{n}</option>
                   ))}
-                </div>
+                </select>
+              </div>
+              <div>
+                <div className="text-[11px] ink-faded uppercase tracking-widest mb-1.5">Items per category</div>
+                <select
+                  className="ctrl-select"
+                  value={numItems}
+                  onChange={(e) => setNumItems(parseInt(e.target.value, 10))}
+                >
+                  {[3, 4, 5, 6, 7].map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <div className="text-[11px] ink-faded uppercase tracking-widest mb-1.5">Theme</div>
@@ -2430,9 +2568,9 @@ export default function App() {
                 {/* Hint cluster */}
                 <div className="pin-card-tight p-2 mb-3 flex gap-2 items-center flex-wrap">
                   <span className="text-[10px] ink-faded uppercase tracking-widest mr-1">Stuck?</span>
-                  <button className="ctrl-btn" onClick={() => runHint(1)}>tier 1 · next step</button>
-                  <button className="ctrl-btn" onClick={() => runHint(2)}>tier 2 · proof</button>
-                  <button className="ctrl-btn" onClick={() => runHint(3)}>tier 3 · solvable?</button>
+                  <button className="ctrl-btn" onClick={() => runHint(1)}>tier 1 · solvable?</button>
+                  <button className="ctrl-btn" onClick={() => runHint(2)}>tier 2 · next step</button>
+                  <button className="ctrl-btn" onClick={() => runHint(3)}>tier 3 · proof</button>
                   <button className="ctrl-btn" onClick={runVerify}>verify marks</button>
                 </div>
 
@@ -2453,7 +2591,7 @@ export default function App() {
                   </div>
                 )}
                 {hint && (
-                  <div className="pin-card p-3 mb-3 hint-result">
+                  <div key={hint.nonce} className="pin-card p-3 mb-3 hint-result hint-flash">
                     <HintResult hint={hint} theme={theme} />
                   </div>
                 )}
@@ -2480,6 +2618,20 @@ export default function App() {
                         disabled={gridZoom === ZOOM_STEPS[ZOOM_STEPS.length - 1]}
                         aria-label="zoom in"
                       >+</button>
+                      <button
+                        className="zoom-fit-btn"
+                        onClick={() => {
+                          const nC = Object.keys(puzzle.categories).length;
+                          const nI = puzzle.categories[Object.keys(puzzle.categories)[0]].length;
+                          const baseW = 14 + 44 + (nC - 1) * nI * 18;
+                          const available = window.innerWidth - 60;
+                          const fit = available / baseW;
+                          const chosen = [...ZOOM_STEPS].reverse().find((z) => z <= fit) || ZOOM_STEPS[0];
+                          setGridZoom(chosen);
+                        }}
+                        aria-label="fit to width"
+                        title="fit grid to viewport width"
+                      >fit</button>
                     </div>
                   </div>
                   <StaircaseGrid
@@ -2665,19 +2817,19 @@ function HintResult({ hint, theme }) {
     );
   }
 
-  if (hint.tier === 1) {
+  if (hint.tier === 2) {
     if (hint.noProgress) {
       return (
         <div className="ink text-sm leading-relaxed">
-          <span className="hint-tag">tier 1</span>
-          No clue-driven next step from here. Either you've extracted everything the clues offer — in which case just keep propagating exclusivity through your committed marks — or try Tier 2 to see a proof for a specific cell.
+          <span className="hint-tag">tier 2</span>
+          No clue-driven next step from here. Either you've extracted everything the clues offer — in which case just keep propagating exclusivity through your committed marks — or try Tier 3 to see a proof for a specific cell.
         </div>
       );
     }
     if (hint.wrongMarks) {
       return (
         <div className="ink text-sm leading-relaxed">
-          <span className="hint-tag">tier 1</span>
+          <span className="hint-tag">tier 2</span>
           No clue-driven progress is possible, and you have{' '}
           <strong className="ink-red">{hint.count}</strong> incorrect{' '}
           {hint.count === 1 ? 'mark' : 'marks'} blocking it. Use <em>verify marks</em> to locate them.
@@ -2686,7 +2838,7 @@ function HintResult({ hint, theme }) {
     }
     return (
       <div className="ink text-sm leading-relaxed">
-        <span className="hint-tag">tier 1 · next step</span>
+        <span className="hint-tag">tier 2 · next step</span>
         <strong>{factSentence(hint.fact, theme)}.</strong>{' '}
         {hint.originClue && (
           <>
@@ -2698,11 +2850,11 @@ function HintResult({ hint, theme }) {
     );
   }
 
-  if (hint.tier === 2) {
+  if (hint.tier === 3) {
     if (hint.noProgress) {
       return (
         <div className="ink text-sm leading-relaxed">
-          <span className="hint-tag">tier 2</span>
+          <span className="hint-tag">tier 3</span>
           No new deduction is currently reachable from your marks. The clues may already be exhausted — try propagating exclusivity through your existing committed cells row by row.
         </div>
       );
@@ -2710,7 +2862,7 @@ function HintResult({ hint, theme }) {
     if (hint.wrongMarks) {
       return (
         <div className="ink text-sm leading-relaxed">
-          <span className="hint-tag">tier 2</span>
+          <span className="hint-tag">tier 3</span>
           No new deduction is reachable, and you have{' '}
           <strong className="ink-red">{hint.count}</strong> incorrect{' '}
           {hint.count === 1 ? 'mark' : 'marks'} blocking progress. Use <em>verify marks</em> to locate them.
@@ -2720,7 +2872,7 @@ function HintResult({ hint, theme }) {
     if (hint.focusUnreachable) {
       return (
         <div className="ink text-sm leading-relaxed">
-          <span className="hint-tag">tier 2</span>
+          <span className="hint-tag">tier 3</span>
           That cell isn't derivable from your current state. Either it's already determined by your marks, or you need to lay more groundwork first.
         </div>
       );
@@ -2776,7 +2928,7 @@ function HintResult({ hint, theme }) {
 
     return (
       <div className="ink text-sm leading-relaxed">
-        <span className="hint-tag">tier 2 · proof</span>
+        <span className="hint-tag">tier 3 · proof</span>
         <div>{headline}</div>
         {supporting.length > 0 && (
           <>
@@ -2842,11 +2994,11 @@ function HintResult({ hint, theme }) {
     );
   }
 
-  if (hint.tier === 3) {
+  if (hint.tier === 1) {
     if (hint.status === 'solved') {
       return (
         <div className="ink text-sm leading-relaxed">
-          <span className="hint-tag">tier 3 · solvable</span>
+          <span className="hint-tag">tier 1 · solvable</span>
           From your current marks, the puzzle resolves to a unique solution in{' '}
           <strong>{hint.passes}</strong> further propagation pass{hint.passes === 1 ? '' : 'es'}.
         </div>
@@ -2855,8 +3007,8 @@ function HintResult({ hint, theme }) {
     if (hint.status === 'underdetermined') {
       return (
         <div className="ink text-sm leading-relaxed">
-          <span className="hint-tag">tier 3 · stuck</span>
-          The clues plus your current marks don't determine a unique solution. You may have missed a deduction — try Tier 1 to surface the next step.
+          <span className="hint-tag">tier 1 · stuck</span>
+          The clues plus your current marks don't determine a unique solution. You may have missed a deduction — try Tier 2 to surface the next step.
         </div>
       );
     }
@@ -2990,8 +3142,13 @@ function TraceView({ puzzle, theme }) {
 
 function Legend({ categories, anchorKey }) {
   const order = [anchorKey, ...Object.keys(categories).filter(k => k !== anchorKey)];
+  // One column per category — adapts to 3, 4, or 5.
+  const cols = order.length;
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-2 text-[11px] pin-card-tight p-3">
+    <div
+      className="grid gap-x-6 gap-y-2 text-[11px] pin-card-tight p-3"
+      style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+    >
       {order.map(cat => {
         const items = categories[cat];
         const hasLongNames = items.some(it => String(it).length > 7);
@@ -3120,13 +3277,13 @@ function StaircaseGrid({ puzzle, gridState, onTap, scratchMode, activeTool, zoom
                       if (committed === 'x') glyph = '✕';
                       else if (committed === 'check') glyph = '✓';
                       // Scratch display rules:
-                      //   scratch mode ON  → always show if present (corner if committed exists, solo otherwise)
-                      //   scratch mode OFF → only show if no committed mark, and grayed
+                      //   scratch mode ON  → always show full-size (committed
+                      //     glyph is hidden by CSS in this mode, so the cell
+                      //     has the green/red highlight + scratch label only)
+                      //   scratch mode OFF → only visible if no committed mark
+                      //     underneath; rendered grayed as a faint preview
                       if (scratch) {
-                        if (committed) {
-                          if (scratchMode) corner = scratch;
-                          // else: hidden under committed (preserved in state)
-                        } else {
+                        if (scratchMode || !committed) {
                           solo = scratch;
                         }
                       }
