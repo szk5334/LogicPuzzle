@@ -23,7 +23,7 @@ import {
   clueExactlyApart, clueBetween, clueNotNextTo, clueWithin,
   clueAtEnd, clueNotAtEnd,
 } from './clues/positional.js';
-import { clueOneOf, clueEither, clueXor2, clueIfThen } from './clues/operator.js';
+import { clueOneOf, clueEither, clueXor2, clueIfThen, clueIff, clueIfThenAnd } from './clues/operator.js';
 import { clueGenericFormula } from './clues/formula.js';
 
 // ----- Solution generation -----
@@ -241,6 +241,41 @@ export function generateAllTrueClues({ categories, solution, anchorKey }) {
     }
     if (!p1 || !p2 || sameAtom(p1, p2)) continue;
     out.push(clueIfThen(p1, p2));
+  }
+
+  // Biconditional: p1 iff p2. Both atoms share a truth value.
+  // Randomize between "both true" and "both false" picks for variety.
+  for (let k = 0; k < 20; k++) {
+    let p1, p2;
+    if (rand(2)) {
+      p1 = pickTrueAtom();
+      p2 = pickTrueAtom();
+    } else {
+      p1 = pickFalseAtom();
+      p2 = pickFalseAtom();
+    }
+    if (!p1 || !p2 || sameAtom(p1, p2)) continue;
+    out.push(clueIff(p1, p2));
+  }
+
+  // IfThen with compound antecedent: if (p1 AND p2) then p3.
+  // Randomize between "antecedent satisfied + consequent true" and
+  // "antecedent vacuously false" — same strategy as clueIfThen.
+  for (let k = 0; k < 20; k++) {
+    let p1, p2, p3;
+    if (rand(2)) {
+      // Antecedent true (both p1 and p2 true); consequent must be true too.
+      p1 = pickTrueAtom();
+      p2 = pickTrueAtom();
+      p3 = pickTrueAtom();
+    } else {
+      // Antecedent vacuously false: at least one of p1, p2 is false.
+      p1 = pickFalseAtom();
+      p2 = pickFalseAtom() || pickTrueAtom();
+      p3 = pickFalseAtom() || pickTrueAtom();
+    }
+    if (!p1 || !p2 || !p3 || !allDistinct(p1, p2, p3)) continue;
+    out.push(clueIfThenAnd(p1, p2, p3));
   }
 
   // Mixed compositional clues — depth-2 formulas with up to 5 operands.
