@@ -84,7 +84,13 @@ export default function App() {
   const [hint, setHint] = useState(null);  // last hint response, or null
   const [verifyResult, setVerifyResult] = useState(null);
 
-  const theme = themes[themeKey];
+  // Render the puzzle with the theme it was generated under, not whatever
+  // the dropdown currently shows. The dropdown's selection only takes effect
+  // at the next Generate click — matching how numCategories and difficulty
+  // already work. Without this, switching themes after generating mismatches
+  // categories (drink/rumor/seat) against the new theme's phrase() function,
+  // which falls back to symbolic notation (drink=gin) and breaks prose.
+  const theme = puzzle?._themeKey ? themes[puzzle._themeKey] : themes[themeKey];
 
   const generate = () => {
     setGenerating(true);
@@ -102,10 +108,14 @@ export default function App() {
     let i = 0;
     const step = () => {
       try {
-        const p = generatePuzzle(theme, numCategories, numItems, difficulty);
+        // Use the dropdown's theme directly here, not the puzzle-bound
+        // `theme` variable above — a new generation should honor the
+        // current dropdown selection, not the previous puzzle's theme.
+        const p = generatePuzzle(themes[themeKey], numCategories, numItems, difficulty);
         if (p.status === 'solved') {
           p._score = scoreInterestingness(p);
           p.par = computePar(p);
+          p._themeKey = themeKey;  // bind for stable rendering across dropdown changes
           accum.push(p);
         }
       } catch (e) { /* skip bad sample */ }
@@ -565,4 +575,3 @@ export default function App() {
     </>
   );
 }
-
