@@ -83,6 +83,17 @@ export function renderClueShared(c, theme) {
       const [notP, q] = c.formula.children;
       return `If ${renderAtom(notP.child)}, then ${renderAtom(q)}.`;
     }
+    case 'iff': {
+      // formula structure: fNot(fXor(p1, p2)) — pull p1 and p2 from inside the XOR.
+      const xor = c.formula.child;
+      const [p1, p2] = xor.children;
+      return `${capit(renderAtom(p1))} if and only if ${renderAtom(p2)}.`;
+    }
+    case 'ifThenAnd': {
+      // formula structure: fOr(fNot(p1), fNot(p2), p3).
+      const [notP1, notP2, p3] = c.formula.children;
+      return `If ${renderAtom(notP1.child)} and ${renderAtom(notP2.child)}, then ${renderAtom(p3)}.`;
+    }
     case 'mixed':
     case 'formula':
       return capit(renderFormula(c.formula)) + '.';
