@@ -134,6 +134,22 @@ export const clueNotNextTo = (catA, a, catB, b, axisKey, axisValues) =>
 export const clueWithin    = (catA, a, catB, b, axisKey, axisValues, dist) =>
   binaryPosClue('within',    catA, a, catB, b, axisKey, axisValues, (ia, ib) => ia !== ib && Math.abs(ia - ib) <= dist, { dist });
 
+// AtLeastApart(k): |i - j| >= k. The inverse-direction companion to Within.
+// `notNextTo` already covers k=2 (|i-j| >= 2 with i != j), so the generator
+// skips k=2 here to avoid two clue types expressing the identical constraint.
+//
+// `phrasing` is a cosmetic field consumed only at render time. Two equivalent
+// prose forms:
+//   'apart'     → "X and Y sat at least K seats apart."
+//   'notWithin' → "X and Y did NOT sit within (K-1) seats of each other."
+// The constraint is the same; the renderer reads `phrasing` to pick which
+// sentence to produce. Phrasing is decided at construction (one Math.random
+// call per candidate) and stored on the clue so the same clue renders
+// identically across multiple view-renderings.
+export const clueAtLeastApart = (catA, a, catB, b, axisKey, axisValues, k, phrasing) =>
+  binaryPosClue('atLeastApart', catA, a, catB, b, axisKey, axisValues,
+    (ia, ib) => Math.abs(ia - ib) >= k, { k, phrasing });
+
 // Unary positional clues — single item, constraint on its axis position alone.
 // `satisfies(index, axisValues)` returns boolean.
 export function unaryPosClue(type, catA, a, axisKey, axisValues, satisfies) {
