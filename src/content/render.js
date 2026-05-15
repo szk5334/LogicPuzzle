@@ -15,9 +15,31 @@ export function renderClueShared(c, theme) {
   const renderFormula = (f) => {
     if (f.kind === 'atom') return renderAtom(f);
     if (f.kind === 'not') return `it is NOT the case that (${renderFormula(f.child)})`;
-    if (f.kind === 'and') return f.children.map(renderFormula).join(', AND ');
-    if (f.kind === 'or')  return f.children.map(renderFormula).join(', OR ');
-    if (f.kind === 'xor') return `exactly one of: [${f.children.map(renderFormula).join(' / ')}]`;
+    // Compound operators (AND/OR/XOR) all wrap non-atom children in parens so
+    // precedence is unambiguous. Without this, AND(OR(a,b), OR(c,d)) would
+    // render as "a OR b AND c OR d" — totally ambiguous. With it: "(a OR b)
+    // AND (c OR d)". The rule applies uniformly to AND, OR, and XOR.
+    const wrap = (c) => {
+      const inner = renderFormula(c);
+      return c.kind === 'atom' ? inner : `(${inner})`;
+    };
+    if (f.kind === 'and') {
+      const items = f.children.map(wrap);
+      if (items.length <= 1) return items[0] || '';
+      if (items.length === 2) return `${items[0]} AND ${items[1]}`;
+      return `${items.slice(0, -1).join(', ')}, AND ${items[items.length - 1]}`;
+    }
+    if (f.kind === 'or') {
+      const items = f.children.map(wrap);
+      if (items.length <= 1) return items[0] || '';
+      if (items.length === 2) return `${items[0]} OR ${items[1]}`;
+      return `${items.slice(0, -1).join(', ')}, OR ${items[items.length - 1]}`;
+    }
+    if (f.kind === 'xor') {
+      // Semicolon separates XOR alternatives so it doesn't collide with the
+      // commas used by nested AND/OR.
+      return `exactly one of: ${f.children.map(wrap).join('; ')}`;
+    }
     return '?';
   };
 
@@ -47,11 +69,11 @@ export function renderClueShared(c, theme) {
     }
     case 'either': {
       const [p1, p2] = c.formula.children;
-      return `Either ${renderAtom(p1)}, or ${renderAtom(p2)} (possibly both).`;
+      return `Either ${renderAtom(p1)} or ${renderAtom(p2)} (possibly both).`;
     }
     case 'xor': {
       const [p1, p2] = c.formula.children;
-      return `Exactly one is true — either ${renderAtom(p1)}, or ${renderAtom(p2)}, but not both.`;
+      return `Exactly one is true — either ${renderAtom(p1)} or ${renderAtom(p2)}, but not both.`;
     }
     case 'neither': {
       const [n1, n2] = c.formula.children;
