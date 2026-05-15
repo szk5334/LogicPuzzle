@@ -5,6 +5,14 @@
 // noir (whodunit). Each declares a priority-ordered category list, a subjectKey
 // for the deduction panel, and per-positional-type prose.
 //
+// Per-theme `orderedKeys` lists non-anchor categories whose items have an
+// inherent natural ordering. The puzzle generator combines this with the
+// anchor (always ordered) to produce categoryMeta and to iterate positional
+// clue generation over every ordered axis. For themes where every non-anchor
+// category is unordered (most of soap/noir's narrative attributes), the list
+// is empty and only the anchor is used as a positional axis — same as
+// pre-2.5.B behavior.
+//
 // Phase 5 will lift theme content (pools, priority orders, factPhrasing strings)
 // into JSON. Phase 2.5 keeps them as JS exports.
 
@@ -13,10 +21,15 @@ import { shuffle } from '../engine/propagation.js';
 import {
   CHARACTER_POOL, DRINK_POOL, SECRET_POOL, RUMOR_POOL,
   OBJECT_POOL, MOTIVE_POOL, WEAPON_POOL, ALIBI_POOL,
-  GIFT_POOL, ATTIRE_POOL,
+  GIFT_POOL, ATTIRE_POOL, AGE_POOL,
   LETTERS, NUMERALS, SHAPES, COLORS, TONES, SYMBOLS, ACCENTS,
 } from './pools.js';
 import { renderClueShared } from './render.js';
+
+// Helpers shared by soap and noir for the `age` category. Sample N distinct
+// ages then sort ascending so the array's index order matches numeric order.
+const sampleAges = (numItems) =>
+  shuffle(AGE_POOL).slice(0, numItems).sort((a, b) => a - b);
 
 export const themes = {
   classic: {
@@ -24,6 +37,10 @@ export const themes = {
     label: 'Classic — letters & numerals',
     anchorKey: 'position',
     subjectKey: 'letter',
+    // Letter, numeral, tone, and accent are all order-bearing string sequences
+    // (alphabetical / numeric / Greek-alphabet / superscript order). Position
+    // is the anchor and is always ordered; declared elsewhere.
+    orderedKeys: ['letter', 'numeral', 'tone', 'accent'],
     categoriesFor(numCats, numItems) {
       // Priority order: anchor → subject → fillers. Take first numCats slots,
       // each populated with numItems items.
@@ -83,17 +100,26 @@ export const themes = {
     label: 'Soap Opera — the dinner party',
     anchorKey: 'seat',
     subjectKey: 'guest',
+    // Guests have ages — a naturally-ordered non-anchor numeric axis.
+    // Other narrative attributes (drink, secret, rumor, gift, attire) are
+    // unordered and stay off this list.
+    orderedKeys: ['age'],
     categoriesFor(numCats, numItems) {
       const all = {
         seat:   () => Array.from({ length: numItems }, (_, i) => i + 1),
         guest:  () => shuffle(CHARACTER_POOL).slice(0, numItems),
+        age:    () => sampleAges(numItems),
         drink:  () => shuffle(DRINK_POOL).slice(0, numItems),
         secret: () => shuffle(SECRET_POOL).slice(0, numItems),
         rumor:  () => shuffle(RUMOR_POOL).slice(0, numItems),
         gift:   () => shuffle(GIFT_POOL).slice(0, numItems),
         attire: () => shuffle(ATTIRE_POOL).slice(0, numItems),
       };
-      const order = ['seat', 'guest', 'drink', 'secret', 'rumor', 'gift', 'attire'];
+      // `age` slots in at position 3 so default 4-cat puzzles include it,
+      // making the non-anchor ordered axis actually exercise the new
+      // positional clue paths. Note: at numCats=7 (the current UI cap),
+      // `attire` drops off the end of the priority list.
+      const order = ['seat', 'guest', 'age', 'drink', 'secret', 'rumor', 'gift', 'attire'];
       const out = {};
       for (let i = 0; i < numCats; i++) out[order[i]] = all[order[i]]();
       return out;
@@ -102,6 +128,7 @@ export const themes = {
     phrase(cat, x) {
       if (cat === 'seat') return `seat ${x}`;
       if (cat === 'guest') return x;
+      if (cat === 'age') return `the ${x}-year-old`;
       if (cat === 'drink') return `the ${x} drinker`;
       if (cat === 'secret') return `whoever was hiding ${x}`;
       if (cat === 'rumor') return `whoever was rumored ${x}`;
@@ -111,6 +138,7 @@ export const themes = {
     },
     factPhrasing(subj, attrs) {
       const parts = [];
+      if ('age'    in attrs) parts.push(`was ${attrs.age ?? '__'}`);
       if ('drink'  in attrs) parts.push(`drank the ${attrs.drink ?? '_____'}`);
       if ('secret' in attrs) parts.push(`was hiding ${attrs.secret ?? '_____'}`);
       if ('rumor'  in attrs) parts.push(`was rumored ${attrs.rumor ?? '_____'}`);
@@ -128,6 +156,16 @@ export const themes = {
         return polarity === 'yes'
           ? `${this.phrase(otherCat, otherVal)} was at seat ${seatVal}`
           : `${this.phrase(otherCat, otherVal)} was NOT at seat ${seatVal}`;
+      }
+      // Age-flavored phrasing so atomic age facts read naturally rather than
+      // through the generic "matches" fallback.
+      if (catA === 'age' || catB === 'age') {
+        const ageVal = catA === 'age' ? a : b;
+        const otherCat = catA === 'age' ? catB : catA;
+        const otherVal = catA === 'age' ? b : a;
+        return polarity === 'yes'
+          ? `${this.phrase(otherCat, otherVal)} was ${ageVal}`
+          : `${this.phrase(otherCat, otherVal)} was NOT ${ageVal}`;
       }
       return polarity === 'yes'
         ? `${this.phrase(catA, a)} matches ${this.phrase(catB, b)}`
@@ -159,17 +197,22 @@ export const themes = {
     label: 'Noir — the suspects',
     anchorKey: 'room',
     subjectKey: 'suspect',
+    // Suspects have ages, same naturally-ordered numeric axis as soap.
+    orderedKeys: ['age'],
     categoriesFor(numCats, numItems) {
       const all = {
         room:     () => Array.from({ length: numItems }, (_, i) => i + 1),
         suspect:  () => shuffle(CHARACTER_POOL).slice(0, numItems),
+        age:      () => sampleAges(numItems),
         evidence: () => shuffle(OBJECT_POOL).slice(0, numItems),
         color:    () => shuffle(COLORS).slice(0, numItems),
         motive:   () => shuffle(MOTIVE_POOL).slice(0, numItems),
         weapon:   () => shuffle(WEAPON_POOL).slice(0, numItems),
         alibi:    () => shuffle(ALIBI_POOL).slice(0, numItems),
       };
-      const order = ['room', 'suspect', 'evidence', 'color', 'motive', 'weapon', 'alibi'];
+      // `age` slots in after `suspect`; at numCats=7 `alibi` drops off the
+      // priority list. Same rationale as soap.
+      const order = ['room', 'suspect', 'age', 'evidence', 'color', 'motive', 'weapon', 'alibi'];
       const out = {};
       for (let i = 0; i < numCats; i++) out[order[i]] = all[order[i]]();
       return out;
@@ -178,6 +221,7 @@ export const themes = {
     phrase(cat, x) {
       if (cat === 'room') return `room ${x}`;
       if (cat === 'suspect') return x;
+      if (cat === 'age') return `the ${x}-year-old`;
       if (cat === 'evidence') return `the one who left the ${x}`;
       if (cat === 'color') return `the one in ${x}`;
       if (cat === 'motive') return `the one driven by ${x}`;
@@ -187,6 +231,7 @@ export const themes = {
     },
     factPhrasing(subj, attrs) {
       const parts = [];
+      if ('age'      in attrs) parts.push(`was ${attrs.age ?? '__'}`);
       if ('color'    in attrs) parts.push(`wore ${attrs.color ?? '_____'}`);
       if ('evidence' in attrs) parts.push(`left the ${attrs.evidence ?? '_____'}`);
       if ('motive'   in attrs) parts.push(`was driven by ${attrs.motive ?? '_____'}`);
@@ -203,6 +248,14 @@ export const themes = {
         return polarity === 'yes'
           ? `${this.phrase(otherCat, otherVal)} was in room ${roomVal}`
           : `${this.phrase(otherCat, otherVal)} was NOT in room ${roomVal}`;
+      }
+      if (catA === 'age' || catB === 'age') {
+        const ageVal = catA === 'age' ? a : b;
+        const otherCat = catA === 'age' ? catB : catA;
+        const otherVal = catA === 'age' ? b : a;
+        return polarity === 'yes'
+          ? `${this.phrase(otherCat, otherVal)} was ${ageVal}`
+          : `${this.phrase(otherCat, otherVal)} was NOT ${ageVal}`;
       }
       return polarity === 'yes'
         ? `${this.phrase(catA, a)} is ${this.phrase(catB, b)}`

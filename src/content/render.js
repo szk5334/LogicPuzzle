@@ -3,10 +3,43 @@
 // out of those primitives. Adding a new clue type means adding a case here and
 // (usually) a renderPositional branch in each theme.
 //
+// Positional clues carry `axisKey`. When the axis IS the theme's anchor, we
+// route to `theme.renderPositional(c)` for the rich anchor-flavored prose
+// ("sat next to", "sat to the left of", etc.). When the axis is a non-anchor
+// ordered category (e.g., `age`), we use the theme-agnostic
+// `renderPositionalNonAnchor` helper below — it appends "in the {axisKey}
+// ordering" to a generic skeleton. Themes can override this later by adding
+// per-axis prose; the generic fallback is the Phase 2.5.B starting point.
+//
 // Phase 3 will add a RenderContext parameter so cross-puzzle atoms can be labeled
 // with → ⁿ superscript notation. The single-puzzle signature stays compatible.
 
 import { capit } from '../utils.js';
+
+// Generic prose for positional clues whose axis isn't the theme's anchor.
+// Each clue type maps to a sentence pattern that names the axis explicitly,
+// so the reader knows which ordering is being referenced.
+function renderPositionalNonAnchor(c, theme) {
+  const phrase = (cat, x) => theme.phrase(cat, x);
+  const A = capit(phrase(c.catA, c.a));
+  const B = c.catB ? phrase(c.catB, c.b) : null;
+  const C = c.catC ? phrase(c.catC, c.c) : null;
+  const ax = c.axisKey;
+  switch (c.type) {
+    case 'nextTo':       return `${A} and ${B} are adjacent in the ${ax} ordering.`;
+    case 'notNextTo':    return `${A} and ${B} are NOT adjacent in the ${ax} ordering.`;
+    case 'immLeft':      return `${A} comes immediately before ${B} in the ${ax} ordering.`;
+    case 'immRight':     return `${A} comes immediately after ${B} in the ${ax} ordering.`;
+    case 'leftOf':       return `${A} comes somewhere before ${B} in the ${ax} ordering.`;
+    case 'rightOf':      return `${A} comes somewhere after ${B} in the ${ax} ordering.`;
+    case 'exactlyApart': return `${A} and ${B} are exactly ${c.dist} apart in the ${ax} ordering.`;
+    case 'within':       return `${A} and ${B} are within ${c.dist} of each other in the ${ax} ordering.`;
+    case 'between':      return `${A} is between ${B} and ${C} in the ${ax} ordering.`;
+    case 'atEnd':        return `${A} is at one end of the ${ax} ordering.`;
+    case 'notAtEnd':     return `${A} is not at either end of the ${ax} ordering.`;
+    default: return '?';
+  }
+}
 
 export function renderClueShared(c, theme) {
   const phrase = (cat, x) => theme.phrase(cat, x);
@@ -57,7 +90,9 @@ export function renderClueShared(c, theme) {
     case 'between':
     case 'atEnd':
     case 'notAtEnd':
-      return theme.renderPositional(c);
+      // Axis-aware routing. Anchor → theme's flavored prose; non-anchor → generic.
+      if (c.axisKey === theme.anchorKey) return theme.renderPositional(c);
+      return renderPositionalNonAnchor(c, theme);
     case 'oneOf': {
       const atoms = c.formula.children;
       const head = atoms[0];
