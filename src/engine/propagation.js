@@ -106,11 +106,12 @@ export function pushFact(table, catA, a, catB, b, value, source, trace) {
       const remB = table.categories[f.catB].filter((b2) => getFact(table, f.catA, f.a, f.catB, b2) !== 'no');
       if (remB.length === 0) return { ok: false };
       if (remB.length === 1 && getFact(table, f.catA, f.a, f.catB, remB[0]) !== 'yes') {
-        // The deduction depends on all the other (N-1) "no" facts in this row,
-        // which together exhaust the alternatives. f itself is one of them; the
-        // rest are pulled from the table as deps.
+        // The deduction depends on (N-1) "no" facts in this row that together
+        // exhaust the alternatives. f itself is one of them — recorded as
+        // `from` — and the OTHER N-2 are the supporting deps. We exclude both
+        // the survivor and f.b here so f isn't cited twice in the proof.
         const exhausted = table.categories[f.catB]
-          .filter((b2) => b2 !== remB[0])
+          .filter((b2) => b2 !== remB[0] && b2 !== f.b)
           .map((b2) => getFactEntry(table, f.catA, f.a, f.catB, b2))
           .filter(Boolean);
         queue.push({ catA: f.catA, a: f.a, catB: f.catB, b: remB[0], value: 'yes', source: { type: 'last-option', from: f, deps: exhausted } });
@@ -119,7 +120,7 @@ export function pushFact(table, catA, a, catB, b, value, source, trace) {
       if (remA.length === 0) return { ok: false };
       if (remA.length === 1 && getFact(table, f.catA, remA[0], f.catB, f.b) !== 'yes') {
         const exhausted = table.categories[f.catA]
-          .filter((a2) => a2 !== remA[0])
+          .filter((a2) => a2 !== remA[0] && a2 !== f.a)
           .map((a2) => getFactEntry(table, f.catA, a2, f.catB, f.b))
           .filter(Boolean);
         queue.push({ catA: f.catA, a: remA[0], catB: f.catB, b: f.b, value: 'yes', source: { type: 'last-option', from: f, deps: exhausted } });
