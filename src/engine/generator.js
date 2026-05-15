@@ -3,13 +3,17 @@
 //   generateSolution     — random consistent assignment over the theme's
 //                          categories; the anchor category stays in its
 //                          natural order, others are shuffled bijections.
+//                          Returns `categoryMeta` declaring which categories
+//                          are ordered axes (anchor + theme.orderedKeys).
 //   generateAllTrueClues — emit every supported clue type that holds for
 //                          the solution (heavy enumeration; the filter
 //                          step in generatePuzzle culls to a minimal set).
+//                          Iterates positional clue generation over each
+//                          ordered axis declared in `categoryMeta`.
 //   generatePuzzle       — sample-and-filter loop. Build the candidate
 //                          clue pool, weight by difficulty, attempt to
 //                          reach a uniquely-solvable subset, return the
-//                          minimal set + trace.
+//                          minimal set + trace + categoryMeta.
 //
 // Phase 3.B will add graph-level generation that plans a joint truth table
 // across all puzzles before emitting per-puzzle clues. The per-puzzle
@@ -30,6 +34,12 @@ import { clueGenericFormula } from './clues/formula.js';
 // A solution is an array of N row-objects, each mapping category -> item.
 // The anchor category (e.g. seat position) is in its natural order; the
 // others are random bijections onto it.
+//
+// `categoryMeta` declares per-category metadata. Right now there's exactly
+// one field: `ordered: bool`. The anchor is always ordered; non-anchor
+// categories opt in via `theme.orderedKeys`. Helpers downstream consult
+// categoryMeta to decide which categories can be the axis for positional
+// clues.
 export function generateSolution(theme, numCategories, numItems) {
   const categories = theme.categoriesFor(numCategories, numItems);
   const anchorKey = theme.anchorKey;
@@ -42,13 +52,22 @@ export function generateSolution(theme, numCategories, numItems) {
       solution[i][key] = item;
     });
   }
-  return { categories, solution, anchorKey, subjectKey: theme.subjectKey || null };
+  const orderedSet = new Set([anchorKey, ...(theme.orderedKeys || [])]);
+  const categoryMeta = {};
+  for (const key of Object.keys(categories)) {
+    categoryMeta[key] = { ordered: orderedSet.has(key) };
+  }
+  return { categories, categoryMeta, solution, anchorKey, subjectKey: theme.subjectKey || null };
 }
 
 // ----- Generate every true clue of each supported type for the solution -----
-export function generateAllTrueClues({ categories, solution, anchorKey }) {
+// Accepts `categoryMeta` to learn which categories are ordered axes. If
+// missing (legacy callers), falls back to anchor-only ordering.
+export function generateAllTrueClues({ categories, categoryMeta, solution, anchorKey }) {
   const out = [];
   const cats = Object.keys(categories);
+
+  // ----- Atomic clues: every cell pair gets either 'is' or 'not'. -----
   for (let i = 0; i < cats.length; i++) {
     for (let j = i + 1; j < cats.length; j++) {
       const catA = cats[i], catB = cats[j];
@@ -59,75 +78,92 @@ export function generateAllTrueClues({ categories, solution, anchorKey }) {
       }
     }
   }
-  // Positional clues — only between non-anchor pairs (more interesting).
-  const nonAnchor = cats.filter((c) => c !== anchorKey);
-  const positions = categories[anchorKey];
-  const N = positions.length;
-  const posOf = (cat, item) => solution.find(r => r[cat] === item)[anchorKey];
-  for (let i = 0; i < nonAnchor.length; i++) {
-    for (let j = i; j < nonAnchor.length; j++) {
-      const catA = nonAnchor[i], catB = nonAnchor[j];
-      for (const a of categories[catA]) for (const b of categories[catB]) {
-        if (catA === catB && a >= b) continue;
-        const pa = posOf(catA, a), pb = posOf(catB, b);
-        // NextTo / NotNextTo
-        if (Math.abs(pa - pb) === 1) out.push(clueNextTo(catA, a, catB, b, anchorKey));
-        if (Math.abs(pa - pb) > 1) out.push(clueNotNextTo(catA, a, catB, b, anchorKey));
-        // ImmLeft / ImmRight (directed — generate both orderings)
-        if (pa + 1 === pb) out.push(clueImmLeft(catA, a, catB, b, anchorKey));
-        if (pb + 1 === pa) out.push(clueImmLeft(catB, b, catA, a, anchorKey));
-        if (pa === pb + 1) out.push(clueImmRight(catA, a, catB, b, anchorKey));
-        if (pb === pa + 1) out.push(clueImmRight(catB, b, catA, a, anchorKey));
-        // LeftOf / RightOf (loose, directed)
-        if (pa < pb) {
-          out.push(clueLeftOf(catA, a, catB, b, anchorKey));
-          out.push(clueRightOf(catB, b, catA, a, anchorKey));
-        }
-        if (pb < pa) {
-          out.push(clueLeftOf(catB, b, catA, a, anchorKey));
-          out.push(clueRightOf(catA, a, catB, b, anchorKey));
-        }
-        // ExactlyApart with N >= 2 (N=1 == NextTo, already covered)
-        const dist = Math.abs(pa - pb);
-        if (dist >= 2) out.push(clueExactlyApart(catA, a, catB, b, anchorKey, dist));
-        // Within(d) for d in [2, 3] when actual distance qualifies (loose bound).
-        // Skip dist=0 (same seat) since the Within predicate excludes it.
-        for (const d of [2, 3]) {
-          if (d < positions.length && dist > 0 && dist <= d) {
-            out.push(clueWithin(catA, a, catB, b, anchorKey, d));
+
+  // ----- Positional clues: one round per ordered axis. -----
+  // Subjects come from every category that isn't the axis itself. For the
+  // anchor axis, that reproduces the pre-2.5.B behavior. For non-anchor
+  // ordered axes (e.g., `age`), the anchor can now be a subject too — e.g.,
+  // "seat 3 is older than seat 5" means whoever's at seat 3 has a higher
+  // age-axis index than whoever's at seat 5.
+  const orderedAxes = categoryMeta
+    ? cats.filter((k) => categoryMeta[k]?.ordered)
+    : [anchorKey];
+  for (const axisKey of orderedAxes) {
+    const axisVals = categories[axisKey];
+    const N = axisVals.length;
+    // O(1) value→index lookup; reused across all subject pairs on this axis.
+    const indexMap = new Map(axisVals.map((v, i) => [v, i]));
+    const posOnAxis = (cat, item) => {
+      const row = solution.find((r) => r[cat] === item);
+      return indexMap.get(row[axisKey]);
+    };
+    const subjectCats = cats.filter((c) => c !== axisKey);
+
+    // Binary positional clues (NextTo / NotNextTo / ImmLeft / ImmRight /
+    // LeftOf / RightOf / ExactlyApart / Within) — iterate over all pairs
+    // of subjects, including same-category pairs (with a < b dedup).
+    for (let i = 0; i < subjectCats.length; i++) {
+      for (let j = i; j < subjectCats.length; j++) {
+        const catA = subjectCats[i], catB = subjectCats[j];
+        for (const a of categories[catA]) for (const b of categories[catB]) {
+          if (catA === catB && a >= b) continue;
+          const pa = posOnAxis(catA, a), pb = posOnAxis(catB, b);
+          // NextTo / NotNextTo
+          if (Math.abs(pa - pb) === 1) out.push(clueNextTo(catA, a, catB, b, axisKey, axisVals));
+          if (Math.abs(pa - pb) > 1) out.push(clueNotNextTo(catA, a, catB, b, axisKey, axisVals));
+          // ImmLeft / ImmRight (directed — generate both orderings)
+          if (pa + 1 === pb) out.push(clueImmLeft(catA, a, catB, b, axisKey, axisVals));
+          if (pb + 1 === pa) out.push(clueImmLeft(catB, b, catA, a, axisKey, axisVals));
+          if (pa === pb + 1) out.push(clueImmRight(catA, a, catB, b, axisKey, axisVals));
+          if (pb === pa + 1) out.push(clueImmRight(catB, b, catA, a, axisKey, axisVals));
+          // LeftOf / RightOf (loose, directed)
+          if (pa < pb) {
+            out.push(clueLeftOf(catA, a, catB, b, axisKey, axisVals));
+            out.push(clueRightOf(catB, b, catA, a, axisKey, axisVals));
+          }
+          if (pb < pa) {
+            out.push(clueLeftOf(catB, b, catA, a, axisKey, axisVals));
+            out.push(clueRightOf(catA, a, catB, b, axisKey, axisVals));
+          }
+          // ExactlyApart with N >= 2 (N=1 == NextTo, already covered).
+          const dist = Math.abs(pa - pb);
+          if (dist >= 2) out.push(clueExactlyApart(catA, a, catB, b, axisKey, axisVals, dist));
+          // Within(d) for d in [2, 3] when actual distance qualifies (loose bound).
+          // Skip dist=0 (same position) since the Within predicate excludes it.
+          for (const d of [2, 3]) {
+            if (d < N && dist > 0 && dist <= d) {
+              out.push(clueWithin(catA, a, catB, b, axisKey, axisVals, d));
+            }
           }
         }
       }
     }
-  }
 
-  // Unary positional clues: AtEnd / NotAtEnd for every non-anchor item.
-  const minP = Math.min(...positions);
-  const maxP = Math.max(...positions);
-  for (const cat of nonAnchor) {
-    for (const a of categories[cat]) {
-      const pa = posOf(cat, a);
-      if (pa === minP || pa === maxP) out.push(clueAtEnd(cat, a, anchorKey));
-      else out.push(clueNotAtEnd(cat, a, anchorKey));
+    // Unary positional clues: AtEnd / NotAtEnd for every subject on this axis.
+    for (const cat of subjectCats) {
+      for (const a of categories[cat]) {
+        const pa = posOnAxis(cat, a);
+        if (pa === 0 || pa === N - 1) out.push(clueAtEnd(cat, a, axisKey, axisVals));
+        else out.push(clueNotAtEnd(cat, a, axisKey, axisVals));
+      }
     }
-  }
 
-  // Between: 3 items from any non-anchor categories, middle one positionally between others.
-  const betweenItems = [];
-  for (const cat of nonAnchor) for (const it of categories[cat]) betweenItems.push({ cat, it, pos: posOf(cat, it) });
-  for (let i = 0; i < betweenItems.length; i++) {
-    for (let j = i + 1; j < betweenItems.length; j++) {
-      for (let k = j + 1; k < betweenItems.length; k++) {
-        const [x, y, z] = [betweenItems[i], betweenItems[j], betweenItems[k]];
-        // Skip duplicate items.
-        if ((x.cat === y.cat && x.it === y.it) || (x.cat === z.cat && x.it === z.it) || (y.cat === z.cat && y.it === z.it)) continue;
-        // Identify the middle by position.
-        const sorted = [x, y, z].sort((u, v) => u.pos - v.pos);
-        const [low, mid, high] = sorted;
-        // Skip triples with any positional tie — Between requires STRICT betweenness,
-        // so the predicate would be false and the clue would contradict the solution.
-        if (low.pos === mid.pos || mid.pos === high.pos) continue;
-        out.push(clueBetween(mid.cat, mid.it, low.cat, low.it, high.cat, high.it, anchorKey));
+    // Between: triples of subjects, middle one positionally between the others.
+    const betweenItems = [];
+    for (const cat of subjectCats) for (const it of categories[cat]) {
+      betweenItems.push({ cat, it, pos: posOnAxis(cat, it) });
+    }
+    for (let i = 0; i < betweenItems.length; i++) {
+      for (let j = i + 1; j < betweenItems.length; j++) {
+        for (let k = j + 1; k < betweenItems.length; k++) {
+          const [x, y, z] = [betweenItems[i], betweenItems[j], betweenItems[k]];
+          if ((x.cat === y.cat && x.it === y.it) || (x.cat === z.cat && x.it === z.it) || (y.cat === z.cat && y.it === z.it)) continue;
+          const sorted = [x, y, z].sort((u, v) => u.pos - v.pos);
+          const [low, mid, high] = sorted;
+          // Strict betweenness: skip triples with any positional tie.
+          if (low.pos === mid.pos || mid.pos === high.pos) continue;
+          out.push(clueBetween(mid.cat, mid.it, low.cat, low.it, high.cat, high.it, axisKey, axisVals));
+        }
       }
     }
   }
@@ -347,8 +383,8 @@ export function generateAllTrueClues({ categories, solution, anchorKey }) {
 
 // ----- Generate a puzzle -----
 export function generatePuzzle(theme, numCategories, numItems, difficulty) {
-  const { categories, solution, anchorKey, subjectKey } = generateSolution(theme, numCategories, numItems);
-  const allClues = generateAllTrueClues({ categories, solution, anchorKey });
+  const { categories, categoryMeta, solution, anchorKey, subjectKey } = generateSolution(theme, numCategories, numItems);
+  const allClues = generateAllTrueClues({ categories, categoryMeta, solution, anchorKey });
 
   // Bias the clue ordering by difficulty. Each type gets a base weight per band.
   // Hard is tuned to spread across clue families — atomics stay low (2) so they
@@ -415,6 +451,7 @@ export function generatePuzzle(theme, numCategories, numItems, difficulty) {
 
   return {
     categories,
+    categoryMeta,
     solution,
     anchorKey,
     subjectKey,
