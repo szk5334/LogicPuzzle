@@ -35,3 +35,35 @@ export function clueIff(p1, p2) {
 export function clueIfThenAnd(p1, p2, p3) {
   return clueFormula(fOr(fNot(p1), fNot(p2), p3), 'ifThenAnd');
 }
+
+// AllDifferent: K subjects are pairwise distinct rows, expressed as a single
+// sentence rather than K*(K-1)/2 separate NOT clues. Sugar over `fAnd` of
+// NOT-atoms — one per pair.
+//
+// In the current bijective category scheme (every category has exactly N items
+// in 1-to-1 correspondence with the anchor), the propagation is identical to
+// the equivalent NOT-clue compound: each pair generates a single "these two
+// don't co-occur" fact. The clue type doesn't add a new logical primitive —
+// it adds prose variety (one compact sentence vs. several pairwise NOTs).
+//
+// `catKey` is cosmetic, used only by the renderer to pick which category-noun
+// to mention ("at different seats" vs. "drank different drinks"). The
+// constraint itself is row-distinctness regardless of the named axis.
+//
+// Constructor expects K ≥ 2; the generator emits K=3 only (K=2 is just
+// clueNot with extra ceremony; K≥5 would push the formula's atom count
+// past clueFormula's 8-atom enumeration cap — K=4 yields 6 atoms and would
+// still be safe, but stays unused for now to keep prose compact).
+export function clueAllDifferent(subjects, catKey) {
+  const atoms = [];
+  for (let i = 0; i < subjects.length; i++) {
+    for (let j = i + 1; j < subjects.length; j++) {
+      const s1 = subjects[i], s2 = subjects[j];
+      atoms.push(fAtom(s1.cat, s1.item, s2.cat, s2.item, 'no'));
+    }
+  }
+  const clue = clueFormula(fAnd(...atoms), 'allDifferent');
+  clue.subjects = subjects;
+  clue.catKey = catKey;
+  return clue;
+}
