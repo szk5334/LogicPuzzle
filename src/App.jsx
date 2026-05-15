@@ -13,14 +13,14 @@ import { themes } from './content/themes.js';
 
 import { useWorksheet } from './hooks/useWorksheet.js';
 
-import { HintResult } from './ui/HintResult.jsx';
-import { Metric } from './ui/Metric.jsx';
-import { ClueScroll } from './ui/ClueScroll.jsx';
-import { DeductionsPanel } from './ui/DeductionsPanel.jsx';
-import { TraceView, OptimalTraceView } from './ui/TraceView.jsx';
-import { Legend } from './ui/Legend.jsx';
-import { StaircaseGrid } from './ui/StaircaseGrid.jsx';
-import { SamplingPanel } from './ui/SamplingPanel.jsx';
+import { HintResult } from './UI/HintResult.jsx';
+import { Metric } from './UI/Metric.jsx';
+import { ClueScroll } from './UI/ClueScroll.jsx';
+import { DeductionsPanel } from './UI/DeductionsPanel.jsx';
+import { TraceView, OptimalTraceView } from './UI/TraceView.jsx';
+import { Legend } from './UI/Legend.jsx';
+import { StaircaseGrid } from './UI/StaircaseGrid.jsx';
+import { SamplingPanel } from './UI/SamplingPanel.jsx';
 
 // ============================================================
 // UI
