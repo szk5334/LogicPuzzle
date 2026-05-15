@@ -36,6 +36,15 @@ function renderPositionalNonAnchor(c, theme) {
     case 'rightOf':      return `${A} comes somewhere after ${B} in the ${ax} ordering.`;
     case 'exactlyApart': return `${A} and ${B} are exactly ${c.dist} apart in the ${ax} ordering.`;
     case 'within':       return `${A} and ${B} are within ${c.dist} of each other in the ${ax} ordering.`;
+    case 'atLeastApart': {
+      // Two equivalent phrasings of |i - j| >= k, chosen at construction.
+      // 'notWithin' phrases it as "not within k-1," reading it back through
+      // the within frame; the constraint is identical to 'apart' framing.
+      if (c.phrasing === 'notWithin') {
+        return `${A} and ${B} are NOT within ${c.k - 1} of each other in the ${ax} ordering.`;
+      }
+      return `${A} and ${B} are at least ${c.k} apart in the ${ax} ordering.`;
+    }
     case 'between':      return `${A} is between ${B} and ${C} in the ${ax} ordering.`;
     case 'atEnd':        return `${A} is at one end of the ${ax} ordering.`;
     case 'notAtEnd':     return `${A} is not at either end of the ${ax} ordering.`;
@@ -89,6 +98,7 @@ export function renderClueShared(c, theme) {
     case 'rightOf':
     case 'exactlyApart':
     case 'within':
+    case 'atLeastApart':
     case 'between':
     case 'atEnd':
     case 'notAtEnd': {

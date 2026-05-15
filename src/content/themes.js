@@ -8,10 +8,13 @@
 // Per-theme `orderedKeys` lists non-anchor categories whose items have an
 // inherent natural ordering. The puzzle generator combines this with the
 // anchor (always ordered) to produce categoryMeta and to iterate positional
-// clue generation over every ordered axis. For themes where every non-anchor
-// category is unordered (most of soap/noir's narrative attributes), the list
-// is empty and only the anchor is used as a positional axis — same as
-// pre-2.5.B behavior.
+// clue generation over every ordered axis.
+//
+// Each theme's renderPositional(c) is the SINGLE source of positional prose
+// for that theme — it branches on c.axisKey to pick anchor-flavored vs.
+// other-axis-flavored language (e.g., "sat next to" for the seat axis vs.
+// "just younger than" for the age axis). For axes a theme doesn't know about,
+// it returns null and render.js falls back to the theme-agnostic skeleton.
 //
 // Phase 5 will lift theme content (pools, priority orders, factPhrasing strings)
 // into JSON. Phase 2.5 keeps them as JS exports.
@@ -74,7 +77,13 @@ export const themes = {
       const op = polarity === 'yes' ? '↔' : '⊥';
       return `${this.phrase(catA, a)} ${op} ${this.phrase(catB, b)}`;
     },
+    // Classic only flavors the anchor (position) axis. For its other ordered
+    // axes (letter/numeral/tone/accent), return null and let the renderer
+    // produce the generic "...in the {axis} ordering" skeleton — which, given
+    // classic's symbolic phrase, comes out compact ("L=A comes before L=B in
+    // the letter ordering"). Matches classic's terse aesthetic.
     renderPositional(c) {
+      if (c.axisKey !== this.anchorKey) return null;
       const A = this.phrase(c.catA, c.a);
       const B = c.catB && this.phrase(c.catB, c.b);
       const C = c.catC && this.phrase(c.catC, c.c);
@@ -87,10 +96,14 @@ export const themes = {
         case 'rightOf':      return `${A} is somewhere right of ${B}.`;
         case 'exactlyApart': return `${A} and ${B} are exactly ${c.dist} positions apart.`;
         case 'within':       return `${A} and ${B} are within ${c.dist} positions of each other.`;
+        case 'atLeastApart':
+          return c.phrasing === 'notWithin'
+            ? `${A} and ${B} are NOT within ${c.k - 1} positions of each other.`
+            : `${A} and ${B} are at least ${c.k} positions apart.`;
         case 'between':      return `${A} is positionally between ${B} and ${C}.`;
         case 'atEnd':        return `${A} is at one of the end positions.`;
         case 'notAtEnd':     return `${A} is not at either end.`;
-        default: return '?';
+        default: return null;
       }
     },
     renderClue(c) { return renderClueShared(c, this); },
@@ -134,7 +147,12 @@ export const themes = {
       if (cat === 'rumor') return `whoever was rumored ${x}`;
       if (cat === 'gift') return `whoever brought ${x}`;
       if (cat === 'attire') return `whoever wore ${x}`;
-      return `${cat}=${x}`;
+      // Defensive fallback: should never fire for soap-generated puzzles, but
+      // can if a puzzle generated under a different theme is somehow rendered
+      // under this one (theme/puzzle desync — App.jsx now binds theme to
+      // puzzle, but the prosy fallback stays as a safety net so rendering
+      // never devolves into symbol notation).
+      return String(x);
     },
     factPhrasing(subj, attrs) {
       const parts = [];
@@ -175,20 +193,51 @@ export const themes = {
       const A = capit(this.phrase(c.catA, c.a));
       const B = c.catB && this.phrase(c.catB, c.b);
       const C = c.catC && this.phrase(c.catC, c.c);
-      switch (c.type) {
-        case 'nextTo':       return `${A} sat next to ${B}.`;
-        case 'notNextTo':    return `${A} did NOT sit next to ${B}.`;
-        case 'immLeft':      return `${A} sat immediately to the left of ${B}.`;
-        case 'immRight':     return `${A} sat immediately to the right of ${B}.`;
-        case 'leftOf':       return `${A} sat somewhere to the left of ${B}.`;
-        case 'rightOf':      return `${A} sat somewhere to the right of ${B}.`;
-        case 'exactlyApart': return `${A} and ${B} sat exactly ${c.dist} seats apart.`;
-        case 'within':       return `${A} and ${B} sat within ${c.dist} seats of each other.`;
-        case 'between':      return `${A} sat between ${B} and ${C}.`;
-        case 'atEnd':        return `${A} sat at one of the ends of the table.`;
-        case 'notAtEnd':     return `${A} sat somewhere in the middle — not at either end.`;
-        default: return '?';
+      // Age axis — gets specifically-flavored prose using younger/older
+      // language, rather than the abstract "comes before in the age ordering"
+      // generic fallback.
+      if (c.axisKey === 'age') {
+        switch (c.type) {
+          case 'nextTo':       return `${A} and ${B} are adjacent in age.`;
+          case 'notNextTo':    return `${A} and ${B} are NOT adjacent in age.`;
+          case 'immLeft':      return `${A} is just younger than ${B}.`;
+          case 'immRight':     return `${A} is just older than ${B}.`;
+          case 'leftOf':       return `${A} is younger than ${B}.`;
+          case 'rightOf':      return `${A} is older than ${B}.`;
+          case 'exactlyApart': return `${A} and ${B} are exactly ${c.dist} places apart in age order.`;
+          case 'within':       return `${A} and ${B} are within ${c.dist} places of each other in age order.`;
+          case 'atLeastApart':
+            return c.phrasing === 'notWithin'
+              ? `${A} and ${B} are NOT within ${c.k - 1} places of each other in age order.`
+              : `${A} and ${B} are at least ${c.k} places apart in age order.`;
+          case 'between':      return `${A}'s age falls between ${B}'s and ${C}'s.`;
+          case 'atEnd':        return `${A} is the youngest or the oldest at the table.`;
+          case 'notAtEnd':     return `${A} is neither the youngest nor the oldest at the table.`;
+          default: return null;
+        }
       }
+      // Seat (anchor) axis.
+      if (c.axisKey === 'seat') {
+        switch (c.type) {
+          case 'nextTo':       return `${A} sat next to ${B}.`;
+          case 'notNextTo':    return `${A} did NOT sit next to ${B}.`;
+          case 'immLeft':      return `${A} sat immediately to the left of ${B}.`;
+          case 'immRight':     return `${A} sat immediately to the right of ${B}.`;
+          case 'leftOf':       return `${A} sat somewhere to the left of ${B}.`;
+          case 'rightOf':      return `${A} sat somewhere to the right of ${B}.`;
+          case 'exactlyApart': return `${A} and ${B} sat exactly ${c.dist} seats apart.`;
+          case 'within':       return `${A} and ${B} sat within ${c.dist} seats of each other.`;
+          case 'atLeastApart':
+            return c.phrasing === 'notWithin'
+              ? `${A} and ${B} did NOT sit within ${c.k - 1} seats of each other.`
+              : `${A} and ${B} sat at least ${c.k} seats apart.`;
+          case 'between':      return `${A} sat between ${B} and ${C}.`;
+          case 'atEnd':        return `${A} sat at one of the ends of the table.`;
+          case 'notAtEnd':     return `${A} sat somewhere in the middle — not at either end.`;
+          default: return null;
+        }
+      }
+      return null;
     },
     renderClue(c) { return renderClueShared(c, this); },
   },
@@ -227,7 +276,8 @@ export const themes = {
       if (cat === 'motive') return `the one driven by ${x}`;
       if (cat === 'weapon') return `whoever used ${x}`;
       if (cat === 'alibi') return `whoever claimed to be ${x}`;
-      return `${cat}=${x}`;
+      // Defensive prose fallback — see soap.phrase for the rationale.
+      return String(x);
     },
     factPhrasing(subj, attrs) {
       const parts = [];
@@ -265,20 +315,47 @@ export const themes = {
       const A = capit(this.phrase(c.catA, c.a));
       const B = c.catB && this.phrase(c.catB, c.b);
       const C = c.catC && this.phrase(c.catC, c.c);
-      switch (c.type) {
-        case 'nextTo':       return `${A}'s room is adjacent to ${B}'s.`;
-        case 'notNextTo':    return `${A}'s room is NOT adjacent to ${B}'s.`;
-        case 'immLeft':      return `${A}'s room is immediately before ${B}'s.`;
-        case 'immRight':     return `${A}'s room is immediately after ${B}'s.`;
-        case 'leftOf':       return `${A}'s room comes somewhere before ${B}'s.`;
-        case 'rightOf':      return `${A}'s room comes somewhere after ${B}'s.`;
-        case 'exactlyApart': return `${A} and ${B} are exactly ${c.dist} rooms apart.`;
-        case 'within':       return `${A} and ${B} are within ${c.dist} rooms of each other.`;
-        case 'between':      return `${A}'s room is between ${B}'s and ${C}'s.`;
-        case 'atEnd':        return `${A} was in one of the end rooms.`;
-        case 'notAtEnd':     return `${A} was not in an end room.`;
-        default: return '?';
+      if (c.axisKey === 'age') {
+        switch (c.type) {
+          case 'nextTo':       return `${A} and ${B} are adjacent in age.`;
+          case 'notNextTo':    return `${A} and ${B} are NOT adjacent in age.`;
+          case 'immLeft':      return `${A} is just younger than ${B}.`;
+          case 'immRight':     return `${A} is just older than ${B}.`;
+          case 'leftOf':       return `${A} is younger than ${B}.`;
+          case 'rightOf':      return `${A} is older than ${B}.`;
+          case 'exactlyApart': return `${A} and ${B} are exactly ${c.dist} places apart in age order.`;
+          case 'within':       return `${A} and ${B} are within ${c.dist} places of each other in age order.`;
+          case 'atLeastApart':
+            return c.phrasing === 'notWithin'
+              ? `${A} and ${B} are NOT within ${c.k - 1} places of each other in age order.`
+              : `${A} and ${B} are at least ${c.k} places apart in age order.`;
+          case 'between':      return `${A}'s age falls between ${B}'s and ${C}'s.`;
+          case 'atEnd':        return `${A} is the youngest or the oldest of the suspects.`;
+          case 'notAtEnd':     return `${A} is neither the youngest nor the oldest of the suspects.`;
+          default: return null;
+        }
       }
+      if (c.axisKey === 'room') {
+        switch (c.type) {
+          case 'nextTo':       return `${A}'s room is adjacent to ${B}'s.`;
+          case 'notNextTo':    return `${A}'s room is NOT adjacent to ${B}'s.`;
+          case 'immLeft':      return `${A}'s room is immediately before ${B}'s.`;
+          case 'immRight':     return `${A}'s room is immediately after ${B}'s.`;
+          case 'leftOf':       return `${A}'s room comes somewhere before ${B}'s.`;
+          case 'rightOf':      return `${A}'s room comes somewhere after ${B}'s.`;
+          case 'exactlyApart': return `${A} and ${B} are exactly ${c.dist} rooms apart.`;
+          case 'within':       return `${A} and ${B} are within ${c.dist} rooms of each other.`;
+          case 'atLeastApart':
+            return c.phrasing === 'notWithin'
+              ? `${A} and ${B} were NOT within ${c.k - 1} rooms of each other.`
+              : `${A} and ${B} were at least ${c.k} rooms apart.`;
+          case 'between':      return `${A}'s room is between ${B}'s and ${C}'s.`;
+          case 'atEnd':        return `${A} was in one of the end rooms.`;
+          case 'notAtEnd':     return `${A} was not in an end room.`;
+          default: return null;
+        }
+      }
+      return null;
     },
     renderClue(c) { return renderClueShared(c, this); },
   },
