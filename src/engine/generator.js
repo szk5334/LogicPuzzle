@@ -26,6 +26,7 @@ import {
   clueNextTo, clueImmLeft, clueImmRight, clueLeftOf, clueRightOf,
   clueExactlyApart, clueBetween, clueNotNextTo, clueWithin,
   clueAtEnd, clueNotAtEnd,
+  clueAtLeastApart,
 } from './clues/positional.js';
 import { clueOneOf, clueEither, clueXor2, clueIfThen, clueIff, clueIfThenAnd } from './clues/operator.js';
 import { clueGenericFormula } from './clues/formula.js';
@@ -133,6 +134,18 @@ export function generateAllTrueClues({ categories, categoryMeta, solution, ancho
           for (const d of [2, 3]) {
             if (d < N && dist > 0 && dist <= d) {
               out.push(clueWithin(catA, a, catB, b, axisKey, axisVals, d));
+            }
+          }
+          // AtLeastApart(k) for k in [3, 4] when actual distance qualifies.
+          // Mirror of within's [2, 3] band, offset by one — we skip k=2
+          // because notNextTo already covers the |i-j| >= 2 constraint.
+          // Phrasing is randomly assigned per candidate so the chosen clues
+          // see a roughly even mix of "at least K apart" and "not within K-1
+          // of each other" sentences; the constraint is identical either way.
+          for (const k of [3, 4]) {
+            if (k < N && dist >= k) {
+              const phrasing = Math.random() < 0.5 ? 'apart' : 'notWithin';
+              out.push(clueAtLeastApart(catA, a, catB, b, axisKey, axisVals, k, phrasing));
             }
           }
         }
@@ -395,9 +408,9 @@ export function generatePuzzle(theme, numCategories, numItems, difficulty) {
   // doesn't dominate the survivors. The 'neither' entry is gone — clueNeither
   // is no longer generated (see comment in the generator loop).
   const WEIGHTS = {
-    easy:   { is: 6, not: 1, nextTo: 2, notNextTo: 1, immLeft: 2, immRight: 2, leftOf: 1, rightOf: 1, exactlyApart: 1, within: 1, between: 1, atEnd: 1, notAtEnd: 1, oneOf: 2, either: 1, xor: 1, ifThen: 1, iff: 1, ifThenAnd: 1, mixed: 1 },
-    medium: { is: 3, not: 3, nextTo: 3, notNextTo: 3, immLeft: 3, immRight: 3, leftOf: 3, rightOf: 3, exactlyApart: 3, within: 3, between: 3, atEnd: 3, notAtEnd: 3, oneOf: 3, either: 3, xor: 3, ifThen: 3, iff: 3, ifThenAnd: 3, mixed: 3 },
-    hard:   { is: 2, not: 2, nextTo: 4, notNextTo: 4, immLeft: 4, immRight: 4, leftOf: 4, rightOf: 4, exactlyApart: 4, within: 4, between: 4, atEnd: 3, notAtEnd: 3, oneOf: 4, either: 5, xor: 5, ifThen: 5, iff: 5, ifThenAnd: 5, mixed: 5 },
+    easy:   { is: 6, not: 1, nextTo: 2, notNextTo: 1, immLeft: 2, immRight: 2, leftOf: 1, rightOf: 1, exactlyApart: 1, within: 1, atLeastApart: 1, between: 1, atEnd: 1, notAtEnd: 1, oneOf: 2, either: 1, xor: 1, ifThen: 1, iff: 1, ifThenAnd: 1, mixed: 1 },
+    medium: { is: 3, not: 3, nextTo: 3, notNextTo: 3, immLeft: 3, immRight: 3, leftOf: 3, rightOf: 3, exactlyApart: 3, within: 3, atLeastApart: 3, between: 3, atEnd: 3, notAtEnd: 3, oneOf: 3, either: 3, xor: 3, ifThen: 3, iff: 3, ifThenAnd: 3, mixed: 3 },
+    hard:   { is: 2, not: 2, nextTo: 4, notNextTo: 4, immLeft: 4, immRight: 4, leftOf: 4, rightOf: 4, exactlyApart: 4, within: 4, atLeastApart: 4, between: 4, atEnd: 3, notAtEnd: 3, oneOf: 4, either: 5, xor: 5, ifThen: 5, iff: 5, ifThenAnd: 5, mixed: 5 },
   };
   const wTable = WEIGHTS[difficulty] || WEIGHTS.medium;
   const weighted = allClues.map((c) => {
