@@ -1,48 +1,55 @@
-// Positional clues. The anchor category must be ordered (numeric or otherwise
-// comparable). Each clue's predicate constrains anchor positions of the named
-// items; the propagator enumerates surviving (pa, pb[, pc]) combinations and
-// marks 'no' for any position eliminated for one of the items.
+// Positional clues. Each clue carries:
+//   - `axisKey`:   the ordered category whose item order defines positions.
+//   - `axisValues`: a snapshot of that category's item array at construction
+//                   time. Position is the INDEX of an item's axis-value in
+//                   axisValues (0..N-1), so predicates work uniformly across
+//                   numeric anchors (e.g., seat 1..N) and non-numeric ordered
+//                   axes (e.g., ages [22, 31, 41, 55]).
 //
-// Phase 2.5.B will generalize the implicit anchor to a `categoryRef` parameter
-// for ordered non-anchor categories. The current signatures still take an
-// `anchorKey` directly.
+// Field name note: this file calls the axis category `axisKey` throughout.
+// Before Phase 2.5.B it was named `anchorKey`, on the assumption the anchor
+// was the only ordered axis. The new name reads correctly whether the axis
+// is the puzzle's anchor or any other ordered non-anchor category. The field
+// is internal to positional.js and the renderer-axis branch in render.js —
+// nothing else inspects it.
 
 import { getFact, pushFact } from '../propagation.js';
 
 // ----- Positional clues (binary helper) -----
-// Two items with positions constrained by a predicate on (pa, pb). Anchor must be
-// an ordered numeric category. Propagates by enumerating valid (pa,pb) pairs that
-// are still consistent with the table and deriving forced facts.
-export function binaryPosClue(type, catA, a, catB, b, anchorKey, predicate, extra = {}) {
+// Predicate takes (indexA, indexB) where indices are 0-based positions on
+// axisKey. Propagation enumerates surviving (vA, vB) value pairs that satisfy
+// the predicate under the current table, then marks 'no' for any axis value
+// that survives for neither item.
+export function binaryPosClue(type, catA, a, catB, b, axisKey, axisValues, predicate, extra = {}) {
   return {
     type,
-    catA, a, catB, b, anchorKey,
+    catA, a, catB, b, axisKey, axisValues,
     ...extra,
     test: (sol) => {
-      const pa = sol.find((r) => r[catA] === a)[anchorKey];
-      const pb = sol.find((r) => r[catB] === b)[anchorKey];
-      return predicate(pa, pb);
+      const va = sol.find((r) => r[catA] === a)[axisKey];
+      const vb = sol.find((r) => r[catB] === b)[axisKey];
+      return predicate(axisValues.indexOf(va), axisValues.indexOf(vb));
     },
     propagate(table, trace) {
-      const positions = table.categories[anchorKey];
-      const possibleA = positions.filter((p) => getFact(table, catA, a, anchorKey, p) !== 'no');
-      const possibleB = positions.filter((p) => getFact(table, catB, b, anchorKey, p) !== 'no');
+      const axisVals = table.categories[axisKey];
+      const possibleA = axisVals.filter((v) => getFact(table, catA, a, axisKey, v) !== 'no');
+      const possibleB = axisVals.filter((v) => getFact(table, catB, b, axisKey, v) !== 'no');
       const valid = [];
-      for (const pa of possibleA) for (const pb of possibleB) {
-        if (predicate(pa, pb)) valid.push([pa, pb]);
+      for (const va of possibleA) for (const vb of possibleB) {
+        if (predicate(axisVals.indexOf(va), axisVals.indexOf(vb))) valid.push([va, vb]);
       }
       if (valid.length === 0) return { ok: false };
       const okA = new Set(valid.map((p) => p[0]));
       const okB = new Set(valid.map((p) => p[1]));
       let changed = false;
-      for (const p of positions) {
-        if (!okA.has(p) && getFact(table, catA, a, anchorKey, p) !== 'no') {
-          const r = pushFact(table, catA, a, anchorKey, p, 'no', { type: 'clue', clue: this }, trace);
+      for (const v of axisVals) {
+        if (!okA.has(v) && getFact(table, catA, a, axisKey, v) !== 'no') {
+          const r = pushFact(table, catA, a, axisKey, v, 'no', { type: 'clue', clue: this }, trace);
           if (!r.ok) return { ok: false };
           if (r.derived.length > 0) changed = true;
         }
-        if (!okB.has(p) && getFact(table, catB, b, anchorKey, p) !== 'no') {
-          const r = pushFact(table, catB, b, anchorKey, p, 'no', { type: 'clue', clue: this }, trace);
+        if (!okB.has(v) && getFact(table, catB, b, axisKey, v) !== 'no') {
+          const r = pushFact(table, catB, b, axisKey, v, 'no', { type: 'clue', clue: this }, trace);
           if (!r.ok) return { ok: false };
           if (r.derived.length > 0) changed = true;
         }
@@ -52,45 +59,45 @@ export function binaryPosClue(type, catA, a, catB, b, anchorKey, predicate, extr
   };
 }
 
-// Three items with positions constrained by a predicate on (pa, pb, pc).
-export function ternaryPosClue(type, catA, a, catB, b, catC, c, anchorKey, predicate) {
+// Three items, predicate on (iA, iB, iC). Same conventions as binaryPosClue.
+export function ternaryPosClue(type, catA, a, catB, b, catC, c, axisKey, axisValues, predicate) {
   return {
     type,
-    catA, a, catB, b, catC, c, anchorKey,
+    catA, a, catB, b, catC, c, axisKey, axisValues,
     test: (sol) => {
-      const pa = sol.find((r) => r[catA] === a)[anchorKey];
-      const pb = sol.find((r) => r[catB] === b)[anchorKey];
-      const pc = sol.find((r) => r[catC] === c)[anchorKey];
-      return predicate(pa, pb, pc);
+      const va = sol.find((r) => r[catA] === a)[axisKey];
+      const vb = sol.find((r) => r[catB] === b)[axisKey];
+      const vc = sol.find((r) => r[catC] === c)[axisKey];
+      return predicate(axisValues.indexOf(va), axisValues.indexOf(vb), axisValues.indexOf(vc));
     },
     propagate(table, trace) {
-      const positions = table.categories[anchorKey];
-      const possA = positions.filter((p) => getFact(table, catA, a, anchorKey, p) !== 'no');
-      const possB = positions.filter((p) => getFact(table, catB, b, anchorKey, p) !== 'no');
-      const possC = positions.filter((p) => getFact(table, catC, c, anchorKey, p) !== 'no');
+      const axisVals = table.categories[axisKey];
+      const possA = axisVals.filter((v) => getFact(table, catA, a, axisKey, v) !== 'no');
+      const possB = axisVals.filter((v) => getFact(table, catB, b, axisKey, v) !== 'no');
+      const possC = axisVals.filter((v) => getFact(table, catC, c, axisKey, v) !== 'no');
       const valid = [];
-      for (const pa of possA) for (const pb of possB) for (const pc of possC) {
-        if (pa === pb || pa === pc || pb === pc) continue;
-        if (predicate(pa, pb, pc)) valid.push([pa, pb, pc]);
+      for (const va of possA) for (const vb of possB) for (const vc of possC) {
+        if (va === vb || va === vc || vb === vc) continue;
+        if (predicate(axisVals.indexOf(va), axisVals.indexOf(vb), axisVals.indexOf(vc))) valid.push([va, vb, vc]);
       }
       if (valid.length === 0) return { ok: false };
       const okA = new Set(valid.map((v) => v[0]));
       const okB = new Set(valid.map((v) => v[1]));
       const okC = new Set(valid.map((v) => v[2]));
       let changed = false;
-      for (const p of positions) {
-        if (!okA.has(p) && getFact(table, catA, a, anchorKey, p) !== 'no') {
-          const r = pushFact(table, catA, a, anchorKey, p, 'no', { type: 'clue', clue: this }, trace);
+      for (const v of axisVals) {
+        if (!okA.has(v) && getFact(table, catA, a, axisKey, v) !== 'no') {
+          const r = pushFact(table, catA, a, axisKey, v, 'no', { type: 'clue', clue: this }, trace);
           if (!r.ok) return { ok: false };
           if (r.derived.length > 0) changed = true;
         }
-        if (!okB.has(p) && getFact(table, catB, b, anchorKey, p) !== 'no') {
-          const r = pushFact(table, catB, b, anchorKey, p, 'no', { type: 'clue', clue: this }, trace);
+        if (!okB.has(v) && getFact(table, catB, b, axisKey, v) !== 'no') {
+          const r = pushFact(table, catB, b, axisKey, v, 'no', { type: 'clue', clue: this }, trace);
           if (!r.ok) return { ok: false };
           if (r.derived.length > 0) changed = true;
         }
-        if (!okC.has(p) && getFact(table, catC, c, anchorKey, p) !== 'no') {
-          const r = pushFact(table, catC, c, anchorKey, p, 'no', { type: 'clue', clue: this }, trace);
+        if (!okC.has(v) && getFact(table, catC, c, axisKey, v) !== 'no') {
+          const r = pushFact(table, catC, c, axisKey, v, 'no', { type: 'clue', clue: this }, trace);
           if (!r.ok) return { ok: false };
           if (r.derived.length > 0) changed = true;
         }
@@ -100,48 +107,49 @@ export function ternaryPosClue(type, catA, a, catB, b, catC, c, anchorKey, predi
   };
 }
 
-// Specific positional clue factories.
-export const clueNextTo = (catA, a, catB, b, ak) =>
-  binaryPosClue('nextTo', catA, a, catB, b, ak, (pa, pb) => Math.abs(pa - pb) === 1);
+// ----- Specific positional clue factories -----
+// All predicates operate on INDICES into axisValues (0..N-1).
+export const clueNextTo = (catA, a, catB, b, axisKey, axisValues) =>
+  binaryPosClue('nextTo', catA, a, catB, b, axisKey, axisValues, (ia, ib) => Math.abs(ia - ib) === 1);
 
-export const clueImmLeft = (catA, a, catB, b, ak) =>
-  binaryPosClue('immLeft', catA, a, catB, b, ak, (pa, pb) => pa + 1 === pb);
+export const clueImmLeft = (catA, a, catB, b, axisKey, axisValues) =>
+  binaryPosClue('immLeft', catA, a, catB, b, axisKey, axisValues, (ia, ib) => ia + 1 === ib);
 
-export const clueLeftOf = (catA, a, catB, b, ak) =>
-  binaryPosClue('leftOf', catA, a, catB, b, ak, (pa, pb) => pa < pb);
+export const clueLeftOf = (catA, a, catB, b, axisKey, axisValues) =>
+  binaryPosClue('leftOf', catA, a, catB, b, axisKey, axisValues, (ia, ib) => ia < ib);
 
-export const clueExactlyApart = (catA, a, catB, b, ak, dist) =>
-  binaryPosClue('exactlyApart', catA, a, catB, b, ak, (pa, pb) => Math.abs(pa - pb) === dist, { dist });
+export const clueExactlyApart = (catA, a, catB, b, axisKey, axisValues, dist) =>
+  binaryPosClue('exactlyApart', catA, a, catB, b, axisKey, axisValues, (ia, ib) => Math.abs(ia - ib) === dist, { dist });
 
-export const clueBetween = (catA, a, catB, b, catC, c, ak) =>
-  ternaryPosClue('between', catA, a, catB, b, catC, c, ak,
-    (pa, pb, pc) => (pb < pa && pa < pc) || (pc < pa && pa < pb));
+export const clueBetween = (catA, a, catB, b, catC, c, axisKey, axisValues) =>
+  ternaryPosClue('between', catA, a, catB, b, catC, c, axisKey, axisValues,
+    (ia, ib, ic) => (ib < ia && ia < ic) || (ic < ia && ia < ib));
 
-// Additional binary positional clues.
-export const clueImmRight  = (catA, a, catB, b, ak) =>
-  binaryPosClue('immRight',  catA, a, catB, b, ak, (pa, pb) => pa === pb + 1);
-export const clueRightOf   = (catA, a, catB, b, ak) =>
-  binaryPosClue('rightOf',   catA, a, catB, b, ak, (pa, pb) => pa > pb);
-export const clueNotNextTo = (catA, a, catB, b, ak) =>
-  binaryPosClue('notNextTo', catA, a, catB, b, ak, (pa, pb) => pa !== pb && Math.abs(pa - pb) !== 1);
-export const clueWithin    = (catA, a, catB, b, ak, dist) =>
-  binaryPosClue('within',    catA, a, catB, b, ak, (pa, pb) => pa !== pb && Math.abs(pa - pb) <= dist, { dist });
+export const clueImmRight  = (catA, a, catB, b, axisKey, axisValues) =>
+  binaryPosClue('immRight',  catA, a, catB, b, axisKey, axisValues, (ia, ib) => ia === ib + 1);
+export const clueRightOf   = (catA, a, catB, b, axisKey, axisValues) =>
+  binaryPosClue('rightOf',   catA, a, catB, b, axisKey, axisValues, (ia, ib) => ia > ib);
+export const clueNotNextTo = (catA, a, catB, b, axisKey, axisValues) =>
+  binaryPosClue('notNextTo', catA, a, catB, b, axisKey, axisValues, (ia, ib) => ia !== ib && Math.abs(ia - ib) !== 1);
+export const clueWithin    = (catA, a, catB, b, axisKey, axisValues, dist) =>
+  binaryPosClue('within',    catA, a, catB, b, axisKey, axisValues, (ia, ib) => ia !== ib && Math.abs(ia - ib) <= dist, { dist });
 
-// Unary positional clues — single item, constraint on its anchor position alone.
-export function unaryPosClue(type, catA, a, anchorKey, satisfies) {
+// Unary positional clues — single item, constraint on its axis position alone.
+// `satisfies(index, axisValues)` returns boolean.
+export function unaryPosClue(type, catA, a, axisKey, axisValues, satisfies) {
   return {
-    type, catA, a, anchorKey,
+    type, catA, a, axisKey, axisValues,
     test: (sol) => {
-      const positions = sol.map((r) => r[anchorKey]);
-      const pa = sol.find((r) => r[catA] === a)[anchorKey];
-      return satisfies(pa, positions);
+      const va = sol.find((r) => r[catA] === a)[axisKey];
+      return satisfies(axisValues.indexOf(va), axisValues);
     },
     propagate(table, trace) {
-      const positions = table.categories[anchorKey];
+      const axisVals = table.categories[axisKey];
       let changed = false;
-      for (const p of positions) {
-        if (!satisfies(p, positions) && getFact(table, catA, a, anchorKey, p) !== 'no') {
-          const r = pushFact(table, catA, a, anchorKey, p, 'no', { type: 'clue', clue: this }, trace);
+      for (const v of axisVals) {
+        const i = axisVals.indexOf(v);
+        if (!satisfies(i, axisVals) && getFact(table, catA, a, axisKey, v) !== 'no') {
+          const r = pushFact(table, catA, a, axisKey, v, 'no', { type: 'clue', clue: this }, trace);
           if (!r.ok) return { ok: false };
           if (r.derived.length > 0) changed = true;
         }
@@ -151,7 +159,7 @@ export function unaryPosClue(type, catA, a, anchorKey, satisfies) {
   };
 }
 
-export const clueAtEnd = (catA, a, ak) =>
-  unaryPosClue('atEnd', catA, a, ak, (p, ps) => p === Math.min(...ps) || p === Math.max(...ps));
-export const clueNotAtEnd = (catA, a, ak) =>
-  unaryPosClue('notAtEnd', catA, a, ak, (p, ps) => p !== Math.min(...ps) && p !== Math.max(...ps));
+export const clueAtEnd = (catA, a, axisKey, axisValues) =>
+  unaryPosClue('atEnd', catA, a, axisKey, axisValues, (i, vs) => i === 0 || i === vs.length - 1);
+export const clueNotAtEnd = (catA, a, axisKey, axisValues) =>
+  unaryPosClue('notAtEnd', catA, a, axisKey, axisValues, (i, vs) => i !== 0 && i !== vs.length - 1);
