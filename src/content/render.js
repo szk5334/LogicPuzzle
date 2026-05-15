@@ -147,6 +147,18 @@ export function renderClueShared(c, theme) {
     case 'mixed':
     case 'formula':
       return capit(renderFormula(c.formula)) + '.';
+    case 'allDifferent': {
+      // Per-theme prose. Theme provides `allDifferentVerbs` — a {catKey: verb-phrase}
+      // map — and the joined subject list slots in front. Falls back to a
+      // generic "differ in their X" sentence if a theme hasn't supplied a
+      // verb for this catKey.
+      const subjs = c.subjects.map((s, i) => i === 0 ? capit(phrase(s.cat, s.item)) : phrase(s.cat, s.item));
+      const list = subjs.length === 2
+        ? `${subjs[0]} and ${subjs[1]}`
+        : `${subjs.slice(0, -1).join(', ')}, and ${subjs[subjs.length - 1]}`;
+      const verb = theme.allDifferentVerbs?.[c.catKey] || `differ in their ${c.catKey}`;
+      return `${list} ${verb}.`;
+    }
     default: return '?';
   }
 }

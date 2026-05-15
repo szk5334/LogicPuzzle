@@ -77,6 +77,18 @@ export const themes = {
       const op = polarity === 'yes' ? '↔' : '⊥';
       return `${this.phrase(catA, a)} ${op} ${this.phrase(catB, b)}`;
     },
+    // Cosmetic verb-phrase per catKey for AllDifferent clue rendering.
+    // The subject list is joined in front of the verb; e.g.,
+    //   "L=A, N=II, and S=◯ are at different positions."
+    allDifferentVerbs: {
+      position: 'are at different positions',
+      letter:   'are paired with different letters',
+      numeral:  'are paired with different numerals',
+      shape:    'are paired with different shapes',
+      tone:     'are paired with different tones',
+      symbol:   'are paired with different symbols',
+      accent:   'are paired with different accents',
+    },
     // Classic only flavors the anchor (position) axis. For its other ordered
     // axes (letter/numeral/tone/accent), return null and let the renderer
     // produce the generic "...in the {axis} ordering" skeleton — which, given
@@ -188,6 +200,16 @@ export const themes = {
       return polarity === 'yes'
         ? `${this.phrase(catA, a)} matches ${this.phrase(catB, b)}`
         : `${this.phrase(catA, a)} does not match ${this.phrase(catB, b)}`;
+    },
+    allDifferentVerbs: {
+      seat:   'sat at different seats',
+      guest:  'are different guests',
+      age:    'are of different ages',
+      drink:  'drank different drinks',
+      secret: 'were hiding different secrets',
+      rumor:  'had different rumors going around them',
+      gift:   'brought different gifts',
+      attire: 'wore different outfits',
     },
     renderPositional(c) {
       const A = capit(this.phrase(c.catA, c.a));
@@ -310,6 +332,16 @@ export const themes = {
       return polarity === 'yes'
         ? `${this.phrase(catA, a)} is ${this.phrase(catB, b)}`
         : `${this.phrase(catA, a)} is not ${this.phrase(catB, b)}`;
+    },
+    allDifferentVerbs: {
+      room:     'were in different rooms',
+      suspect:  'are different suspects',
+      age:      'are of different ages',
+      evidence: 'left different pieces of evidence',
+      color:    'wore different colors',
+      motive:   'had different motives',
+      weapon:   'used different weapons',
+      alibi:    'gave different alibis',
     },
     renderPositional(c) {
       const A = capit(this.phrase(c.catA, c.a));
