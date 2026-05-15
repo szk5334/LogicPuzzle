@@ -3,22 +3,24 @@
 // out of those primitives. Adding a new clue type means adding a case here and
 // (usually) a renderPositional branch in each theme.
 //
-// Positional clues carry `axisKey`. When the axis IS the theme's anchor, we
-// route to `theme.renderPositional(c)` for the rich anchor-flavored prose
-// ("sat next to", "sat to the left of", etc.). When the axis is a non-anchor
-// ordered category (e.g., `age`), we use the theme-agnostic
-// `renderPositionalNonAnchor` helper below — it appends "in the {axisKey}
-// ordering" to a generic skeleton. Themes can override this later by adding
-// per-axis prose; the generic fallback is the Phase 2.5.B starting point.
+// Positional clues carry `axisKey`. Each theme's renderPositional inspects
+// axisKey internally and returns either a flavored sentence (anchor-axis or
+// any non-anchor axis the theme has prose for) or null. When null comes back,
+// we fall back to the theme-agnostic skeleton in renderPositionalNonAnchor —
+// it appends "in the {axisKey} ordering" to a generic frame, which is fine for
+// axes a theme hasn't bothered to flavor (e.g., classic's letter/numeral/tone
+// axes) but reads awkwardly enough that themes are nudged to flavor their
+// frequently-used axes.
 //
 // Phase 3 will add a RenderContext parameter so cross-puzzle atoms can be labeled
 // with → ⁿ superscript notation. The single-puzzle signature stays compatible.
 
 import { capit } from '../utils.js';
 
-// Generic prose for positional clues whose axis isn't the theme's anchor.
-// Each clue type maps to a sentence pattern that names the axis explicitly,
-// so the reader knows which ordering is being referenced.
+// Generic prose skeleton for positional clues whose theme returned null —
+// either the theme doesn't know about this axis, or it doesn't handle this
+// clue type. Names the axis explicitly so the reader knows which ordering is
+// being referenced.
 function renderPositionalNonAnchor(c, theme) {
   const phrase = (cat, x) => theme.phrase(cat, x);
   const A = capit(phrase(c.catA, c.a));
@@ -89,10 +91,13 @@ export function renderClueShared(c, theme) {
     case 'within':
     case 'between':
     case 'atEnd':
-    case 'notAtEnd':
-      // Axis-aware routing. Anchor → theme's flavored prose; non-anchor → generic.
-      if (c.axisKey === theme.anchorKey) return theme.renderPositional(c);
+    case 'notAtEnd': {
+      // Theme owns axis routing. If it returns null (axis it doesn't flavor),
+      // fall back to the theme-agnostic skeleton.
+      const themed = theme.renderPositional(c);
+      if (themed != null) return themed;
       return renderPositionalNonAnchor(c, theme);
+    }
     case 'oneOf': {
       const atoms = c.formula.children;
       const head = atoms[0];
