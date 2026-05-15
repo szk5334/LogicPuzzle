@@ -25,3 +25,13 @@ export function clueIfThen(p1, p2) {
   // p1 -> p2 == (!p1) OR p2
   return clueFormula(fOr(fNot(p1), p2), 'ifThen');
 }
+// Biconditional: p1 iff p2. Both atoms have the same truth value.
+// Logically: NOT(XOR(p1, p2)) — same propagation as XOR, just inverted.
+export function clueIff(p1, p2) {
+  return clueFormula(fNot(fXor(p1, p2)), 'iff');
+}
+// IfThen with compound antecedent: if (p1 AND p2) then p3.
+// Logically: NOT(p1 AND p2) OR p3 = (NOT p1) OR (NOT p2) OR p3.
+export function clueIfThenAnd(p1, p2, p3) {
+  return clueFormula(fOr(fNot(p1), fNot(p2), p3), 'ifThenAnd');
+}
