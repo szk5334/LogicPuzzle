@@ -95,6 +95,15 @@ export function hintTier1(puzzle, gridState) {
     return { tier: 2, contradiction: true, ...verifyMarks(puzzle, gridState) };
   }
 
+  // Puzzle complete from marks: result.passes === 0 means no clue pass derived
+  // anything beyond what mark-seed cascades already gave us. Combined with no
+  // wrong marks, the player's committed facts (typically all check marks) have
+  // determined the entire puzzle via exclusivity. Check marks are sufficient
+  // for the answer — X marks are scratch work and not required for completion.
+  if (result.passes === 0 && verifyMarks(puzzle, gridState).count === 0) {
+    return { tier: 2, complete: true };
+  }
+
   // Walk trace post-mark-seed for the first fact whose DAG reaches a clue.
   let inMarkSeed = false;
   for (const t of trace) {
@@ -124,6 +133,15 @@ export function hintTier2(puzzle, gridState, focusCell) {
 
   if (result.status === 'contradiction') {
     return { tier: 3, contradiction: true, ...verifyMarks(puzzle, gridState) };
+  }
+
+  // Puzzle complete from marks (see hintTier1 for rationale). When no focus
+  // cell is given, we treat completeness as the top-priority outcome rather
+  // than surfacing cascade-derived facts the player hasn't yet marked. If a
+  // focus cell IS supplied, the player is asking for a specific proof, so
+  // honor that even on a complete puzzle.
+  if (!focusCell && result.passes === 0 && verifyMarks(puzzle, gridState).count === 0) {
+    return { tier: 3, complete: true };
   }
 
   let target = null;
@@ -184,6 +202,10 @@ export function hintTier3(puzzle, gridState) {
 
   if (result.status === 'contradiction') {
     return { tier: 1, contradiction: true, ...verifyMarks(puzzle, gridState) };
+  }
+  // Puzzle complete from marks (see hintTier1 for rationale).
+  if (result.passes === 0 && verifyMarks(puzzle, gridState).count === 0) {
+    return { tier: 1, complete: true };
   }
   return { tier: 1, status: result.status, passes: result.passes };
 }
