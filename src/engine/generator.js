@@ -351,10 +351,17 @@ export function generatePuzzle(theme, numCategories, numItems, difficulty) {
   const allClues = generateAllTrueClues({ categories, solution, anchorKey });
 
   // Bias the clue ordering by difficulty. Each type gets a base weight per band.
+  // Hard is tuned to spread across clue families — atomics stay low (2) so they
+  // don't crowd out richer types, but they're competitive enough to surface in
+  // some puzzles. Operator-binary types (either/xor/ifThen/iff/ifThenAnd) sit
+  // at apex (5) alongside the mixed compound formulas. Heaviest positional
+  // types (between/exactlyApart/...) sit at 4 so a single positional family
+  // doesn't dominate the survivors. The 'neither' entry is gone — clueNeither
+  // is no longer generated (see comment in the generator loop).
   const WEIGHTS = {
-    easy:   { is: 6, not: 1, nextTo: 2, notNextTo: 1, immLeft: 2, immRight: 2, leftOf: 1, rightOf: 1, exactlyApart: 1, within: 1, between: 1, atEnd: 1, notAtEnd: 1, oneOf: 2, either: 1, xor: 1, neither: 1, ifThen: 1, mixed: 1 },
-    medium: { is: 3, not: 3, nextTo: 3, notNextTo: 3, immLeft: 3, immRight: 3, leftOf: 3, rightOf: 3, exactlyApart: 3, within: 3, between: 3, atEnd: 3, notAtEnd: 3, oneOf: 3, either: 3, xor: 3, neither: 3, ifThen: 3, mixed: 3 },
-    hard:   { is: 1, not: 4, nextTo: 5, notNextTo: 4, immLeft: 5, immRight: 5, leftOf: 4, rightOf: 4, exactlyApart: 5, within: 4, between: 5, atEnd: 3, notAtEnd: 3, oneOf: 4, either: 5, xor: 5, neither: 4, ifThen: 5, mixed: 6 },
+    easy:   { is: 6, not: 1, nextTo: 2, notNextTo: 1, immLeft: 2, immRight: 2, leftOf: 1, rightOf: 1, exactlyApart: 1, within: 1, between: 1, atEnd: 1, notAtEnd: 1, oneOf: 2, either: 1, xor: 1, ifThen: 1, iff: 1, ifThenAnd: 1, mixed: 1 },
+    medium: { is: 3, not: 3, nextTo: 3, notNextTo: 3, immLeft: 3, immRight: 3, leftOf: 3, rightOf: 3, exactlyApart: 3, within: 3, between: 3, atEnd: 3, notAtEnd: 3, oneOf: 3, either: 3, xor: 3, ifThen: 3, iff: 3, ifThenAnd: 3, mixed: 3 },
+    hard:   { is: 2, not: 2, nextTo: 4, notNextTo: 4, immLeft: 4, immRight: 4, leftOf: 4, rightOf: 4, exactlyApart: 4, within: 4, between: 4, atEnd: 3, notAtEnd: 3, oneOf: 4, either: 5, xor: 5, ifThen: 5, iff: 5, ifThenAnd: 5, mixed: 5 },
   };
   const wTable = WEIGHTS[difficulty] || WEIGHTS.medium;
   const weighted = allClues.map((c) => {
@@ -372,12 +379,23 @@ export function generatePuzzle(theme, numCategories, numItems, difficulty) {
   }
 
   // Minimize: drop any clue whose absence still leaves it solvable.
+  // Drop-order is type-aware: over-represented types are tried for dropping
+  // FIRST. If a clue from a heavy type can be removed while keeping the puzzle
+  // solvable, it goes — biasing survivors toward type diversity. Within a
+  // single type-count bucket, order is randomized so the choice isn't
+  // deterministic. (We compute counts once per pass; they go stale as clues
+  // drop, but the next reduce() call sees fresh counts so it self-corrects.)
   const reduce = (clueList) => {
     let cur = [...clueList];
-    const order = shuffle(cur.map((_, i) => i));
-    for (const idx of order) {
-      const target = cur[idx];
-      if (target == null) continue;
+    const counts = {};
+    for (const c of cur) counts[c.type] = (counts[c.type] || 0) + 1;
+    const toTry = [...cur].sort((a, b) => {
+      const ca = counts[a.type], cb = counts[b.type];
+      if (ca !== cb) return cb - ca;
+      return Math.random() - 0.5;
+    });
+    for (const target of toTry) {
+      if (!cur.includes(target)) continue;
       const trial = cur.filter((c) => c !== target);
       const r = solveWithClues(categories, trial, null);
       if (r.status === 'solved') {
