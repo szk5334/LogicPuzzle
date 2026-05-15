@@ -178,6 +178,16 @@ export function generateAllTrueClues({ categories, solution, anchorKey }) {
     return null;
   };
   const sameAtom = (x, y) => canonKey(x.catA, x.a, x.catB, x.b) === canonKey(y.catA, y.a, y.catB, y.b);
+  // Pairwise-distinct check for compound formulas. Without this the picks can
+  // alias and produce degenerate clues like XOR(a, a, c) or AND(a, NOT(a), c).
+  const allDistinct = (...atoms) => {
+    for (let i = 0; i < atoms.length; i++) {
+      for (let j = i + 1; j < atoms.length; j++) {
+        if (sameAtom(atoms[i], atoms[j])) return false;
+      }
+    }
+    return true;
+  };
 
   // OneOf: "catA[a] is one of [b1, b2, ...]" (with the true partner among options).
   // Always include the true partner; pad with distractors.
@@ -237,32 +247,57 @@ export function generateAllTrueClues({ categories, solution, anchorKey }) {
   // Generate a handful of each shape and keep ones that hold for the solution.
   for (let k = 0; k < 18; k++) {
     let formula;
-    const shape = rand(4);
+    const shape = rand(7);
     if (shape === 0) {
-      // And(Or(a,b), Or(c,d)) — 4 operands
+      // And(Or(a,b), Or(c,d)) — 4 operands, "at-least-one in each group"
       const a = pickTrueAtom(), b = pickTrueAtom();
       const c = pickTrueAtom(), d = pickFalseAtom();
-      if (!a || !b || !c || !d) continue;
+      if (!a || !b || !c || !d || !allDistinct(a, b, c, d)) continue;
       formula = fAnd(fOr(a, b), fOr(c, d));
     } else if (shape === 1) {
       // Or(And(a,b), c) — 3 operands
       const a = pickTrueAtom(), b = pickTrueAtom();
       const c = pickFalseAtom() || pickTrueAtom();
-      if (!a || !b || !c) continue;
+      if (!a || !b || !c || !allDistinct(a, b, c)) continue;
       formula = fOr(fAnd(a, b), c);
     } else if (shape === 2) {
-      // Xor(Or(a,b), c) — 3 operands
+      // Xor(Or(a,b), c) — 3 operands, non-trivial atom coupling
       const a = pickFalseAtom(), b = pickFalseAtom();
       const c = pickTrueAtom();
-      if (!a || !b || !c) continue;
+      if (!a || !b || !c || !allDistinct(a, b, c)) continue;
       formula = fXor(fOr(a, b), c);
-    } else {
+    } else if (shape === 3) {
+      // Xor(a, b, c) — flat 3-atom XOR (exactly one of three true)
+      const a = pickTrueAtom();
+      const b = pickFalseAtom();
+      const c = pickFalseAtom();
+      if (!a || !b || !c || !allDistinct(a, b, c)) continue;
+      formula = fXor(a, b, c);
+    } else if (shape === 4) {
       // Or(a, b, c) — 3 operands flat OR
       const a = pickTrueAtom();
       const b = pickFalseAtom() || pickTrueAtom();
       const c = pickFalseAtom() || pickTrueAtom();
-      if (!a || !b || !c) continue;
+      if (!a || !b || !c || !allDistinct(a, b, c)) continue;
       formula = fOr(a, b, c);
+    } else if (shape === 5) {
+      // Or(And(a,b), And(c,d)) — 4 operands, "either pair is true"
+      // First pair both-true (the satisfying path); second pair has at least
+      // one false so the formula isn't trivially satisfied by both branches.
+      const a = pickTrueAtom(), b = pickTrueAtom();
+      const c = pickFalseAtom();
+      const d = pickFalseAtom() || pickTrueAtom();
+      if (!a || !b || !c || !d || !allDistinct(a, b, c, d)) continue;
+      formula = fOr(fAnd(a, b), fAnd(c, d));
+    } else {
+      // Xor(And(a,b), c) — 3 operands, "exactly one: this pair, or this single"
+      // AND-pair has at least one false (so the pair is false); single is true.
+      // Asymmetric counterpart to Shape 2 (Xor(Or, atom)).
+      const a = pickFalseAtom();
+      const b = pickFalseAtom() || pickTrueAtom();
+      const c = pickTrueAtom();
+      if (!a || !b || !c || !allDistinct(a, b, c)) continue;
+      formula = fXor(fAnd(a, b), c);
     }
     if (formulaHoldsForSolution(formula, solution)) {
       out.push(clueGenericFormula(formula));
