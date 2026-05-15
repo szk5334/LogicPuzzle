@@ -23,7 +23,7 @@ import {
   clueExactlyApart, clueBetween, clueNotNextTo, clueWithin,
   clueAtEnd, clueNotAtEnd,
 } from './clues/positional.js';
-import { clueOneOf, clueEither, clueXor2, clueNeither, clueIfThen } from './clues/operator.js';
+import { clueOneOf, clueEither, clueXor2, clueIfThen } from './clues/operator.js';
 import { clueGenericFormula } from './clues/formula.js';
 
 // ----- Solution generation -----
@@ -214,13 +214,10 @@ export function generateAllTrueClues({ categories, solution, anchorKey }) {
     out.push(clueXor2(t, f));
   }
 
-  // Neither (NOR): both atoms are false. Pick two false atoms.
-  for (let k = 0; k < 20; k++) {
-    const a1 = pickFalseAtom();
-    const a2 = pickFalseAtom();
-    if (!a1 || !a2 || sameAtom(a1, a2)) continue;
-    out.push(clueNeither(a1, a2));
-  }
+  // Neither (NOR) is intentionally NOT generated. "Neither X nor Y is Z" decomposes
+  // losslessly into two separate "not" clues — same propagation, no atom coupling —
+  // and the minimizer would otherwise prefer one compound clue over two atoms.
+  // clueNeither remains exported from clues/operator.js for hand-authored content.
 
   // IfThen: p1 -> p2. True iff p1 false or p2 true. Pick one of two recipes.
   for (let k = 0; k < 20; k++) {
