@@ -448,18 +448,56 @@ export function generatePuzzle(theme, numCategories, numItems, difficulty) {
     hard:   { is: 2, not: 2, nextTo: 4, notNextTo: 4, immLeft: 4, immRight: 4, leftOf: 4, rightOf: 4, exactlyApart: 4, within: 4, atLeastApart: 4, between: 4, atEnd: 3, notAtEnd: 3, oneOf: 4, either: 5, xor: 5, ifThen: 5, iff: 5, ifThenAnd: 5, allDifferent: 4, mixed: 5 },
   };
   const wTable = WEIGHTS[difficulty] || WEIGHTS.medium;
-  const weighted = allClues.map((c) => {
-    const w = wTable[c.type] ?? 2;
-    return { clue: c, w: w * (0.5 + Math.random()) };
-  }).sort((x, y) => y.w - x.w);
 
-  // Add clues until propagation determines the puzzle.
+  // Type-balanced clue selection.
+  //
+  // Each type emits a wildly different number of candidates: a 7×7 puzzle
+  // produces ~15k `between` candidates and ~7k `allDifferent` (their
+  // generators iterate over all pairs/triples) while operator types like
+  // xor/iff/ifThen emit only ~20 (their generators retry a fixed number of
+  // attempts). The old "sort all candidates by weight × random and pick the
+  // top until solved" scheme let high-count types monopolize the top of the
+  // sort just by sheer presence — at uniform weights (medium difficulty in
+  // particular), `between` would crowd out almost everything else.
+  //
+  // Instead: group candidates by type, shuffle within each group, then on
+  // each iteration pick a TYPE weighted by its configured weight and pull
+  // that type's next candidate. This makes the weight system actually mean
+  // what it looks like: weight[T] / sum(weights) is the probability of T
+  // contributing the next clue, independent of how many candidates T has.
+  //
+  // The minimizer downstream still drops over-represented types first, so
+  // the final clue mix is doubly type-balanced.
+  const byType = {};
+  for (const c of allClues) (byType[c.type] ||= []).push(c);
+  for (const type of Object.keys(byType)) shuffle(byType[type]);
+
+  const cursors = new Map();
+  for (const type of Object.keys(byType)) cursors.set(type, 0);
+
   const chosen = [];
-  for (const { clue } of weighted) {
-    chosen.push(clue);
-    const r = solveWithClues(categories, chosen, null);
-    if (r.status === 'solved') break;
-    if (chosen.length > allClues.length) break;
+  while (chosen.length <= allClues.length) {
+    // Types that still have unpulled candidates
+    const active = [];
+    for (const type of Object.keys(byType)) {
+      if (cursors.get(type) < byType[type].length) active.push(type);
+    }
+    if (active.length === 0) break;
+    // Weighted random pick over active types
+    const weights = active.map((t) => wTable[t] ?? 2);
+    const total = weights.reduce((s, w) => s + w, 0);
+    let r = Math.random() * total;
+    let pickedType = active[active.length - 1];
+    for (let i = 0; i < active.length; i++) {
+      r -= weights[i];
+      if (r < 0) { pickedType = active[i]; break; }
+    }
+    // Pull the next candidate from that type and test solvability
+    const idx = cursors.get(pickedType);
+    cursors.set(pickedType, idx + 1);
+    chosen.push(byType[pickedType][idx]);
+    const res = solveWithClues(categories, chosen, null);
+    if (res.status === 'solved') break;
   }
 
   // Minimize: drop any clue whose absence still leaves it solvable.
