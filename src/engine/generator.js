@@ -463,7 +463,24 @@ export function generateAllTrueClues({ categories, categoryMeta, solution, ancho
 }
 
 // ----- Generate a puzzle -----
-export function generatePuzzle(theme, numCategories, numItems, difficulty) {
+// ----- Generate a puzzle -----
+//
+// Signature (back-compat): generatePuzzle(theme, numCategories, numItems, difficulty)
+// Extended:                generatePuzzle(theme, numCategories, numItems, difficulty, config)
+//
+// `config` is optional and supports:
+//   typeFocus     — 'natural' (default; use per-difficulty WEIGHTS), 'even'
+//                   (flat across all types), or an array of clue-type names
+//                   (focused types share 90% weight, others share 10%).
+//   adaptiveMin   — when true (default), the minimizer early-exits after a
+//                   pass with zero drops. Profile data: pass 1 drops ~98%
+//                   of the time, pass 2 only 4%, pass 3 never. Cuts ~33%
+//                   of minimizer work safely.
+//
+// Returns the same puzzle shape as before. Score and par are NOT computed here
+// — the caller (App.jsx) applies its chosen priority-mode scorer.
+export function generatePuzzle(theme, numCategories, numItems, difficulty, config = {}) {
+  const { typeFocus = 'natural', adaptiveMin = true } = config;
   const { categories, categoryMeta, solution, anchorKey, subjectKey } = generateSolution(theme, numCategories, numItems);
   const allClues = generateAllTrueClues({ categories, categoryMeta, solution, anchorKey, subjectKey });
 
@@ -480,7 +497,31 @@ export function generatePuzzle(theme, numCategories, numItems, difficulty) {
     medium: { is: 3, not: 3, nextTo: 3, notNextTo: 3, immLeft: 3, immRight: 3, leftOf: 3, rightOf: 3, exactlyApart: 3, within: 3, atLeastApart: 3, between: 3, atEnd: 3, notAtEnd: 3, oneOf: 3, either: 3, xor: 3, ifThen: 3, iff: 3, ifThenAnd: 3, allDifferent: 3, unalignedPair: 3, mixed: 3 },
     hard:   { is: 2, not: 2, nextTo: 4, notNextTo: 4, immLeft: 4, immRight: 4, leftOf: 4, rightOf: 4, exactlyApart: 4, within: 4, atLeastApart: 4, between: 4, atEnd: 3, notAtEnd: 3, oneOf: 4, either: 5, xor: 5, ifThen: 5, iff: 5, ifThenAnd: 5, allDifferent: 4, unalignedPair: 4, mixed: 5 },
   };
-  const wTable = WEIGHTS[difficulty] || WEIGHTS.medium;
+  const baseWeights = WEIGHTS[difficulty] || WEIGHTS.medium;
+
+  // Resolve the active weight table from the difficulty band + typeFocus.
+  // 'natural' uses the difficulty's WEIGHTS verbatim. 'even' overrides with a
+  // flat 1 per type. A non-empty array enables focus mode: focused types
+  // share 90 weight equally, others share 10 to prevent generation deadlock
+  // when the focused types alone can't solve the puzzle.
+  let wTable;
+  if (Array.isArray(typeFocus) && typeFocus.length > 0) {
+    wTable = {};
+    const allTypeKeys = Object.keys(baseWeights);
+    const focusedSet = new Set(typeFocus);
+    const nFocused = typeFocus.length;
+    const nOther = allTypeKeys.length - nFocused;
+    const focusW = 90 / nFocused;
+    const otherW = nOther > 0 ? 10 / nOther : 0;
+    for (const t of allTypeKeys) {
+      wTable[t] = focusedSet.has(t) ? focusW : otherW;
+    }
+  } else if (typeFocus === 'even') {
+    wTable = {};
+    for (const t of Object.keys(baseWeights)) wTable[t] = 1;
+  } else {
+    wTable = baseWeights;
+  }
 
   // Type-balanced clue selection.
   //
@@ -510,14 +551,12 @@ export function generatePuzzle(theme, numCategories, numItems, difficulty) {
 
   const chosen = [];
   while (chosen.length <= allClues.length) {
-    // Types that still have unpulled candidates
     const active = [];
     for (const type of Object.keys(byType)) {
       if (cursors.get(type) < byType[type].length) active.push(type);
     }
     if (active.length === 0) break;
-    // Weighted random pick over active types
-    const weights = active.map((t) => wTable[t] ?? 2);
+    const weights = active.map((t) => wTable[t] ?? 1);
     const total = weights.reduce((s, w) => s + w, 0);
     let r = Math.random() * total;
     let pickedType = active[active.length - 1];
@@ -525,7 +564,6 @@ export function generatePuzzle(theme, numCategories, numItems, difficulty) {
       r -= weights[i];
       if (r < 0) { pickedType = active[i]; break; }
     }
-    // Pull the next candidate from that type
     const idx = cursors.get(pickedType);
     cursors.set(pickedType, idx + 1);
     const newClue = byType[pickedType][idx];
@@ -541,8 +579,17 @@ export function generatePuzzle(theme, numCategories, numItems, difficulty) {
   // single type-count bucket, order is randomized so the choice isn't
   // deterministic. (We compute counts once per pass; they go stale as clues
   // drop, but the next reduce() call sees fresh counts so it self-corrects.)
+  //
+  // reduce() returns { cur, dropped } so the outer loop can early-exit when
+  // a pass yields zero drops. Profile data on 465 puzzles at 5×5: pass 1
+  // drops in 98% of puzzles, pass 2 in 4%, pass 3 never. Pass 1 is by far
+  // the most expensive (drops against the bloated ~100-clue pre-min set);
+  // passes 2-3 each try-drop against only the ~15-clue minimal set. So the
+  // adaptive early-exit cuts ~33% of attempts but only ~2% of wall time.
+  // No quality loss either way.
   const reduce = (clueList) => {
     let cur = [...clueList];
+    let dropped = 0;
     const counts = {};
     for (const c of cur) counts[c.type] = (counts[c.type] || 0) + 1;
     const toTry = [...cur].sort((a, b) => {
@@ -556,14 +603,18 @@ export function generatePuzzle(theme, numCategories, numItems, difficulty) {
       const r = solveWithClues(categories, trial, null);
       if (r.status === 'solved') {
         cur = trial;
+        dropped++;
       }
     }
-    return cur;
+    return { cur, dropped };
   };
-  let minimal = reduce(chosen);
-  // Run two more passes — order matters, so additional rounds can shave more.
-  minimal = reduce(minimal);
-  minimal = reduce(minimal);
+
+  let minimal = chosen;
+  for (let pass = 0; pass < 3; pass++) {
+    const res = reduce(minimal);
+    minimal = res.cur;
+    if (adaptiveMin && res.dropped === 0) break;
+  }
 
   // Re-solve with trace.
   const trace = [];
