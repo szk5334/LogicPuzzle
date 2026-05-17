@@ -1,98 +1,63 @@
-// Formula AST for compositional clues.
-//
-// Atoms are leaf propositions about (catA-item, catB-item) pairs with a
-// polarity. fNot/fAnd/fOr/fXor compose them. Used by clueFormula and the
-// operator-flavored constructors (either, xor, neither, ifThen).
+// Formula-based clue. Propagates by enumerating consistent yes/no assignments
+// to the formula's atoms; any atom that takes a single value across all
+// satisfying assignments is forced.
 
-import { canonKey } from './propagation.js';
+import { getFact, getFactEntry, pushFact } from '../propagation.js';
+import { extractAtoms, uniqueProps, evalFormula, formulaHoldsForSolution } from '../formula.js';
 
-// Atoms: { kind: 'atom', catA, a, catB, b, polarity: 'yes'|'no' }
-//   polarity 'yes' means "catA[a] paired with catB[b]"
-//   polarity 'no'  means "catA[a] NOT paired with catB[b]"
-export const fAtom = (catA, a, catB, b, polarity = 'yes') =>
-  ({ kind: 'atom', catA, a, catB, b, polarity });
-export const fNot = (child) => ({ kind: 'not', child });
-export const fAnd = (...children) => ({ kind: 'and', children });
-export const fOr  = (...children) => ({ kind: 'or',  children });
-export const fXor = (...children) => ({ kind: 'xor', children });
-
-export function extractAtoms(f) {
-  if (f.kind === 'atom') return [f];
-  if (f.kind === 'not') return extractAtoms(f.child);
-  return f.children.flatMap(extractAtoms);
-}
-
-// Deduplicate atoms by their underlying proposition (ignoring polarity).
-export function uniqueProps(atoms) {
-  const seen = new Set();
-  const out = [];
-  for (const a of atoms) {
-    const k = canonKey(a.catA, a.a, a.catB, a.b);
-    if (!seen.has(k)) {
-      seen.add(k);
-      out.push({ catA: a.catA, a: a.a, catB: a.catB, b: a.b, key: k });
-    }
-  }
-  return out;
-}
-
-// Evaluate formula given a map<propKey, 'yes'|'no'>. Returns true/false, or
-// undefined if any required atom isn't determined yet.
-export function evalFormula(f, vmap) {
-  if (f.kind === 'atom') {
-    const v = vmap.get(canonKey(f.catA, f.a, f.catB, f.b));
-    if (v === undefined) return undefined;
-    return f.polarity === 'yes' ? v === 'yes' : v === 'no';
-  }
-  if (f.kind === 'not') {
-    const c = evalFormula(f.child, vmap);
-    return c === undefined ? undefined : !c;
-  }
-  if (f.kind === 'and') {
-    let anyU = false;
-    for (const c of f.children) {
-      const r = evalFormula(c, vmap);
-      if (r === false) return false;
-      if (r === undefined) anyU = true;
-    }
-    return anyU ? undefined : true;
-  }
-  if (f.kind === 'or') {
-    let anyU = false;
-    for (const c of f.children) {
-      const r = evalFormula(c, vmap);
-      if (r === true) return true;
-      if (r === undefined) anyU = true;
-    }
-    return anyU ? undefined : false;
-  }
-  if (f.kind === 'xor') {
-    let trueCount = 0, anyU = false;
-    for (const c of f.children) {
-      const r = evalFormula(c, vmap);
-      if (r === undefined) anyU = true;
-      else if (r === true) trueCount++;
-      if (trueCount > 1 && !anyU) return false;
-    }
-    if (anyU) return undefined;
-    return trueCount === 1;
-  }
-}
-
-// True if the formula holds for the given solution.
-export function formulaHoldsForSolution(formula, solution) {
-  const cats = Object.keys(solution[0]);
-  const vmap = new Map();
-  for (const row of solution) {
-    for (let i = 0; i < cats.length; i++) {
-      for (let j = i + 1; j < cats.length; j++) {
-        vmap.set(canonKey(cats[i], row[cats[i]], cats[j], row[cats[j]]), 'yes');
+// Generic formula-based clue. Propagates by enumerating consistent assignments
+// to the formula's atoms and deriving any fact that holds in every assignment.
+// Caps atoms at 8 (256 enumerations) for safety; usually 2-5.
+export function clueFormula(formula, type, render) {
+  return {
+    type,
+    formula,
+    render,
+    test(sol) { return formulaHoldsForSolution(formula, sol); },
+    propagate(table, trace) {
+      const atoms = uniqueProps(extractAtoms(formula));
+      if (atoms.length === 0) return { ok: true, changed: false };
+      if (atoms.length > 8) return { ok: true, changed: false };
+      const known = atoms.map(p => getFact(table, p.catA, p.a, p.catB, p.b));
+      const valid = [];
+      const n = atoms.length;
+      for (let mask = 0; mask < (1 << n); mask++) {
+        const vmap = new Map();
+        let ok = true;
+        for (let i = 0; i < n; i++) {
+          const v = (mask >> i) & 1 ? 'yes' : 'no';
+          if (known[i] !== null && known[i] !== v) { ok = false; break; }
+          vmap.set(atoms[i].key, v);
+        }
+        if (!ok) continue;
+        if (evalFormula(formula, vmap) === true) valid.push(vmap);
       }
-    }
-  }
-  // Fill in 'no' for any atom the formula references that we didn't set.
-  for (const a of uniqueProps(extractAtoms(formula))) {
-    if (!vmap.has(a.key)) vmap.set(a.key, 'no');
-  }
-  return evalFormula(formula, vmap) === true;
+      if (valid.length === 0) return { ok: false };
+      // Any atom already known when this propagator runs is part of why
+      // the new deduction follows from the clue. Collect those as deps.
+      const knownDeps = [];
+      for (let i = 0; i < n; i++) {
+        if (known[i] !== null) {
+          const e = getFactEntry(table, atoms[i].catA, atoms[i].a, atoms[i].catB, atoms[i].b);
+          if (e) knownDeps.push(e);
+        }
+      }
+      let changed = false;
+      for (let i = 0; i < n; i++) {
+        if (known[i] !== null) continue;
+        const vs = new Set(valid.map(a => a.get(atoms[i].key)));
+        if (vs.size === 1) {
+          const v = vs.values().next().value;
+          const r = pushFact(table, atoms[i].catA, atoms[i].a, atoms[i].catB, atoms[i].b, v, { type: 'clue', clue: this, deps: knownDeps }, trace);
+          if (!r.ok) return { ok: false };
+          if (r.derived.length > 0) changed = true;
+        }
+      }
+      return { ok: true, changed };
+    },
+  };
+}
+
+export function clueGenericFormula(formula) {
+  return clueFormula(formula, 'mixed');
 }

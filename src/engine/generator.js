@@ -492,10 +492,11 @@ export function generatePuzzle(theme, numCategories, numItems, difficulty) {
       r -= weights[i];
       if (r < 0) { pickedType = active[i]; break; }
     }
-    // Pull the next candidate from that type and test solvability
+    // Pull the next candidate from that type
     const idx = cursors.get(pickedType);
     cursors.set(pickedType, idx + 1);
-    chosen.push(byType[pickedType][idx]);
+    const newClue = byType[pickedType][idx];
+    chosen.push(newClue);
     const res = solveWithClues(categories, chosen, null);
     if (res.status === 'solved') break;
   }
@@ -526,20 +527,10 @@ export function generatePuzzle(theme, numCategories, numItems, difficulty) {
     }
     return cur;
   };
-  // Adaptive multi-pass: keep running passes while progress is being made,
-  // bounded at 3 total passes so worst-case cost equals the prior fixed
-  // 3-pass scheme. When a pass yields no drops, subsequent passes can't
-  // either (the candidate set is unchanged), so we bail. Common case for
-  // converged puzzles is 1 pass; harder cases run 2 or 3.
-  const MAX_PASSES = 3;
   let minimal = reduce(chosen);
-  let prevLen = chosen.length;
-  let pass = 1;
-  while (pass < MAX_PASSES && minimal.length < prevLen) {
-    prevLen = minimal.length;
-    minimal = reduce(minimal);
-    pass++;
-  }
+  // Run two more passes — order matters, so additional rounds can shave more.
+  minimal = reduce(minimal);
+  minimal = reduce(minimal);
 
   // Re-solve with trace.
   const trace = [];
