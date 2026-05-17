@@ -135,6 +135,11 @@ export function pushFact(table, catA, a, catB, b, value, source, trace) {
 // and runs clue propagation to fixed point. Initial marks are pushed via pushFact with
 // source {type: 'mark'} so their cascade fires and any later trace-walking terminates at them.
 // solveWithClues is now a thin wrapper for the empty-seed case (generator flow).
+// ----- Run propagation to fixed point -----
+// Core solver: starts from a seeded table of `initialMarks` (each: {catA, a, catB, b, value})
+// and runs clue propagation to fixed point. Initial marks are pushed via pushFact with
+// source {type: 'mark'} so their cascade fires and any later trace-walking terminates at them.
+// solveWithClues is now a thin wrapper for the empty-seed case (generator flow).
 export function solveFromState(categories, clues, initialMarks, trace) {
   const table = makeTable(categories);
 
