@@ -526,10 +526,20 @@ export function generatePuzzle(theme, numCategories, numItems, difficulty) {
     }
     return cur;
   };
+  // Adaptive multi-pass: keep running passes while progress is being made.
+  // The multi-pass approach catches stragglers where a different drop-order
+  // would have found additional reductions — but the marginal benefit of
+  // each pass shrinks quickly. Most puzzles fully minimize in 1 pass and a
+  // second pass with re-randomized type-count ties catches the rest. Bailing
+  // as soon as a pass makes no progress avoids paying for repeat solver work
+  // on puzzles that have already converged, which is the common case.
+  const MAX_PASSES = 4;
   let minimal = reduce(chosen);
-  // Run two more passes — order matters, so additional rounds can shave more.
-  minimal = reduce(minimal);
-  minimal = reduce(minimal);
+  let prevLen = chosen.length;
+  for (let p = 1; p < MAX_PASSES && minimal.length < prevLen; p++) {
+    prevLen = minimal.length;
+    minimal = reduce(minimal);
+  }
 
   // Re-solve with trace.
   const trace = [];
