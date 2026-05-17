@@ -211,6 +211,19 @@ export const themes = {
       gift:   'brought different gifts',
       attire: 'wore different outfits',
     },
+    // Verb-fragments used by unalignedPair rendering. Each maps a catKey to
+    // a function (value) => sentence-fragment, slotted into "one X and the
+    // other Y" → "one was hiding the embezzlement and the other was hiding
+    // the stolen will" style prose. Mirrors the soap factPhrasing verbs.
+    unalignedPairVerbs: {
+      seat:   (v) => `was at seat ${v}`,
+      age:    (v) => `was ${v}`,
+      drink:  (v) => `drank the ${v}`,
+      secret: (v) => `was hiding ${v}`,
+      rumor:  (v) => `was rumored ${v}`,
+      gift:   (v) => `brought ${v}`,
+      attire: (v) => `wore ${v}`,
+    },
     renderPositional(c) {
       const A = capit(this.phrase(c.catA, c.a));
       const B = c.catB && this.phrase(c.catB, c.b);
@@ -342,6 +355,17 @@ export const themes = {
       motive:   'had different motives',
       weapon:   'used different weapons',
       alibi:    'gave different alibis',
+    },
+    // Verb-fragments used by unalignedPair rendering. Mirrors noir's
+    // factPhrasing patterns ("left the X", "was driven by Y", etc.).
+    unalignedPairVerbs: {
+      room:     (v) => `was in room ${v}`,
+      age:      (v) => `was ${v}`,
+      evidence: (v) => `left the ${v}`,
+      color:    (v) => `wore ${v}`,
+      motive:   (v) => `was driven by ${v}`,
+      weapon:   (v) => `used ${v}`,
+      alibi:    (v) => `claimed to be ${v}`,
     },
     renderPositional(c) {
       const A = capit(this.phrase(c.catA, c.a));

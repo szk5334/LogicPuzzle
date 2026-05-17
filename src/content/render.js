@@ -159,6 +159,28 @@ export function renderClueShared(c, theme) {
       const verb = theme.allDifferentVerbs?.[c.catKey] || `differ in their ${c.catKey}`;
       return `${list} ${verb}.`;
     }
+    case 'unalignedPair': {
+      // Themes can fully override via renderUnalignedPair(c) → string | null.
+      // Returning null falls through to the generic skeleton below.
+      if (theme.renderUnalignedPair) {
+        const themed = theme.renderUnalignedPair(c);
+        if (themed != null) return themed;
+      }
+      const [s1, s2] = c.subjects;
+      const [v1, v2] = c.values;
+      const sPhrase = (item) => phrase(c.subjectCat, item);
+      // Theme may supply unalignedPairVerbs to flavor specific catKeys —
+      // a {catKey: (value) => string} map, where the function returns the
+      // sentence-fragment for one half (e.g., 'was hiding embezzlement').
+      // For catKeys without an entry we fall back to "is paired with X",
+      // using the theme's standard phrase() for the value (works well for
+      // anchor and other compact-noun categories).
+      const verb = theme.unalignedPairVerbs?.[c.catKey];
+      if (verb) {
+        return `Of ${capit(sPhrase(s1))} and ${sPhrase(s2)}, one ${verb(v1)} and the other ${verb(v2)}.`;
+      }
+      return `Of ${capit(sPhrase(s1))} and ${sPhrase(s2)}, one is paired with ${phrase(c.catKey, v1)} and the other with ${phrase(c.catKey, v2)}.`;
+    }
     default: return '?';
   }
 }
