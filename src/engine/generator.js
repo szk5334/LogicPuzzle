@@ -28,7 +28,7 @@ import {
   clueAtEnd, clueNotAtEnd,
   clueAtLeastApart,
 } from './clues/positional.js';
-import { clueOneOf, clueEither, clueXor2, clueIfThen, clueIff, clueIfThenAnd, clueAllDifferent } from './clues/operator.js';
+import { clueOneOf, clueEither, clueXor2, clueIfThen, clueIff, clueIfThenAnd, clueAllDifferent, clueUnalignedPair } from './clues/operator.js';
 import { clueGenericFormula } from './clues/formula.js';
 
 // ----- Solution generation -----
@@ -64,7 +64,7 @@ export function generateSolution(theme, numCategories, numItems) {
 // ----- Generate every true clue of each supported type for the solution -----
 // Accepts `categoryMeta` to learn which categories are ordered axes. If
 // missing (legacy callers), falls back to anchor-only ordering.
-export function generateAllTrueClues({ categories, categoryMeta, solution, anchorKey }) {
+export function generateAllTrueClues({ categories, categoryMeta, solution, anchorKey, subjectKey }) {
   const out = [];
   const cats = Object.keys(categories);
 
@@ -423,6 +423,39 @@ export function generateAllTrueClues({ categories, categoryMeta, solution, ancho
     }
   }
 
+  // ----- UnalignedPair clues -----
+  // Pick two subjects (s1, s2) from the theme's subjectKey category, and a
+  // different category catKey whose values for those subjects become (v1,
+  // v2). The clue says "one of {s1, s2} is paired with v1 and the other
+  // with v2" — without saying which way.
+  //
+  // We restrict subjects to subjectKey (e.g., guest, suspect, letter) rather
+  // than any non-anchor category. The constraint is symmetric — "of Alice
+  // and Bob, one drinks tea" is the same logical fact as "of tea and
+  // coffee, one is drunk by Alice" — so emitting one canonical direction is
+  // sufficient. subjectKey gives the most natural prose: people-as-subjects
+  // (or letters in the classic theme) read as actors, with values as their
+  // attributes.
+  const sCat = subjectKey || cats.find((c) => c !== anchorKey);
+  if (sCat && sCat !== anchorKey) {
+    const sItems = categories[sCat];
+    for (let i = 0; i < sItems.length; i++) {
+      for (let j = i + 1; j < sItems.length; j++) {
+        const s1 = sItems[i], s2 = sItems[j];
+        const r1 = solution.find((r) => r[sCat] === s1);
+        const r2 = solution.find((r) => r[sCat] === s2);
+        for (const vCat of cats) {
+          if (vCat === sCat) continue;
+          const v1 = r1[vCat], v2 = r2[vCat];
+          out.push(clueUnalignedPair(
+            { cat: sCat, item: s1 }, { cat: sCat, item: s2 },
+            vCat, v1, v2,
+          ));
+        }
+      }
+    }
+  }
+
   // Defensive safety net: drop any clue that doesn't actually hold for the solution.
   // Protects against generator bugs where the emission condition doesn't match the
   // predicate (e.g. same-seat pairs slipping through for Within/Between).
@@ -432,7 +465,7 @@ export function generateAllTrueClues({ categories, categoryMeta, solution, ancho
 // ----- Generate a puzzle -----
 export function generatePuzzle(theme, numCategories, numItems, difficulty) {
   const { categories, categoryMeta, solution, anchorKey, subjectKey } = generateSolution(theme, numCategories, numItems);
-  const allClues = generateAllTrueClues({ categories, categoryMeta, solution, anchorKey });
+  const allClues = generateAllTrueClues({ categories, categoryMeta, solution, anchorKey, subjectKey });
 
   // Bias the clue ordering by difficulty. Each type gets a base weight per band.
   // Hard is tuned to spread across clue families — atomics stay low (2) so they
@@ -443,9 +476,9 @@ export function generatePuzzle(theme, numCategories, numItems, difficulty) {
   // doesn't dominate the survivors. The 'neither' entry is gone — clueNeither
   // is no longer generated (see comment in the generator loop).
   const WEIGHTS = {
-    easy:   { is: 6, not: 1, nextTo: 2, notNextTo: 1, immLeft: 2, immRight: 2, leftOf: 1, rightOf: 1, exactlyApart: 1, within: 1, atLeastApart: 1, between: 1, atEnd: 1, notAtEnd: 1, oneOf: 2, either: 1, xor: 1, ifThen: 1, iff: 1, ifThenAnd: 1, allDifferent: 1, mixed: 1 },
-    medium: { is: 3, not: 3, nextTo: 3, notNextTo: 3, immLeft: 3, immRight: 3, leftOf: 3, rightOf: 3, exactlyApart: 3, within: 3, atLeastApart: 3, between: 3, atEnd: 3, notAtEnd: 3, oneOf: 3, either: 3, xor: 3, ifThen: 3, iff: 3, ifThenAnd: 3, allDifferent: 3, mixed: 3 },
-    hard:   { is: 2, not: 2, nextTo: 4, notNextTo: 4, immLeft: 4, immRight: 4, leftOf: 4, rightOf: 4, exactlyApart: 4, within: 4, atLeastApart: 4, between: 4, atEnd: 3, notAtEnd: 3, oneOf: 4, either: 5, xor: 5, ifThen: 5, iff: 5, ifThenAnd: 5, allDifferent: 4, mixed: 5 },
+    easy:   { is: 6, not: 1, nextTo: 2, notNextTo: 1, immLeft: 2, immRight: 2, leftOf: 1, rightOf: 1, exactlyApart: 1, within: 1, atLeastApart: 1, between: 1, atEnd: 1, notAtEnd: 1, oneOf: 2, either: 1, xor: 1, ifThen: 1, iff: 1, ifThenAnd: 1, allDifferent: 1, unalignedPair: 1, mixed: 1 },
+    medium: { is: 3, not: 3, nextTo: 3, notNextTo: 3, immLeft: 3, immRight: 3, leftOf: 3, rightOf: 3, exactlyApart: 3, within: 3, atLeastApart: 3, between: 3, atEnd: 3, notAtEnd: 3, oneOf: 3, either: 3, xor: 3, ifThen: 3, iff: 3, ifThenAnd: 3, allDifferent: 3, unalignedPair: 3, mixed: 3 },
+    hard:   { is: 2, not: 2, nextTo: 4, notNextTo: 4, immLeft: 4, immRight: 4, leftOf: 4, rightOf: 4, exactlyApart: 4, within: 4, atLeastApart: 4, between: 4, atEnd: 3, notAtEnd: 3, oneOf: 4, either: 5, xor: 5, ifThen: 5, iff: 5, ifThenAnd: 5, allDifferent: 4, unalignedPair: 4, mixed: 5 },
   };
   const wTable = WEIGHTS[difficulty] || WEIGHTS.medium;
 
