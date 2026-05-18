@@ -500,23 +500,46 @@ export function generatePuzzle(theme, numCategories, numItems, difficulty, confi
   const baseWeights = WEIGHTS[difficulty] || WEIGHTS.medium;
 
   // Resolve the active weight table from the difficulty band + typeFocus.
-  // 'natural' uses the difficulty's WEIGHTS verbatim. 'even' overrides with a
-  // flat 1 per type. A non-empty array enables focus mode: focused types
-  // share 90 weight equally, others share 10 to prevent generation deadlock
-  // when the focused types alone can't solve the puzzle.
+  // typeFocus accepted forms:
+  //   'natural'                — use the per-difficulty WEIGHTS verbatim
+  //   'even'                   — flat 1 across all types (override band)
+  //   [type, type, ...]        — focus mode: listed types share 90 weight
+  //                              equally, others share 10 (deadlock floor)
+  //   { fixed: [...], rotate: [...] }
+  //                            — rotating focus mode: per-call, draw one type
+  //                              from `rotate` uniformly at random and combine
+  //                              with `fixed` into the focus array. Across
+  //                              many calls this gives each rotate type equal
+  //                              representation while keeping `fixed` always
+  //                              present. Used by the "brutal" preset:
+  //                              fixed=[iff,mixed,xor], rotate=[9 hard types].
+  //
+  // The 90/10 deadlock-floor split prevents generation from stalling when the
+  // focused types alone can't solve a particular puzzle.
+  let resolvedFocus = typeFocus;
+  if (typeFocus && typeof typeFocus === 'object' && !Array.isArray(typeFocus)) {
+    const { fixed = [], rotate = [] } = typeFocus;
+    if (rotate.length > 0) {
+      const pick = rotate[Math.floor(Math.random() * rotate.length)];
+      resolvedFocus = [...fixed, pick];
+    } else {
+      resolvedFocus = fixed.length > 0 ? fixed : 'natural';
+    }
+  }
+
   let wTable;
-  if (Array.isArray(typeFocus) && typeFocus.length > 0) {
+  if (Array.isArray(resolvedFocus) && resolvedFocus.length > 0) {
     wTable = {};
     const allTypeKeys = Object.keys(baseWeights);
-    const focusedSet = new Set(typeFocus);
-    const nFocused = typeFocus.length;
+    const focusedSet = new Set(resolvedFocus);
+    const nFocused = resolvedFocus.length;
     const nOther = allTypeKeys.length - nFocused;
     const focusW = 90 / nFocused;
     const otherW = nOther > 0 ? 10 / nOther : 0;
     for (const t of allTypeKeys) {
       wTable[t] = focusedSet.has(t) ? focusW : otherW;
     }
-  } else if (typeFocus === 'even') {
+  } else if (resolvedFocus === 'even') {
     wTable = {};
     for (const t of Object.keys(baseWeights)) wTable[t] = 1;
   } else {
@@ -630,5 +653,10 @@ export function generatePuzzle(theme, numCategories, numItems, difficulty, confi
     trace,
     status: finalSolve.status,
     passes: finalSolve.passes,
+    // The resolved focus array used by this generation call. For non-rotating
+    // typeFocus values, mirrors the input. For { fixed, rotate } form, this
+    // captures which rotate type was drawn — useful for debugging, UI display
+    // ("this puzzle came from focus = [iff, mixed, xor, oneOf]"), and stats.
+    resolvedFocus,
   };
 }
