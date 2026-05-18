@@ -1,0 +1,96 @@
+{
+  "_provenance": {
+    "source": "1000 random 4-type combinations, K=3 puzzles each",
+    "totalPuzzles": 3000,
+    "engine": "post-Batch-2 with typeFocus + adaptiveMin",
+    "puzzleSize": "5x5",
+    "difficultyBand": "hard",
+    "themes": ["classic", "soapOpera", "noir"],
+    "seed": "mulberry32(42)",
+    "regressionMethod": "OLS, centered, opposite-pair pooling",
+    "modelFit": {
+      "diff_R2": 0.531,
+      "time_R2": 0.322
+    }
+  },
+  "_pooledPairs": [
+    ["immLeft", "immRight"],
+    ["leftOf", "rightOf"]
+  ],
+  "intercepts": {
+    "diff": 395,
+    "time": 280
+  },
+  "betaDiff": {
+    "nextTo": -23,
+    "notNextTo": -6,
+    "immLeft": -11,
+    "immRight": -11,
+    "leftOf": -7,
+    "rightOf": -7,
+    "exactlyApart": -10,
+    "within": -8,
+    "atLeastApart": -35,
+    "between": -39,
+    "atEnd": -90,
+    "notAtEnd": -56,
+    "oneOf": 1,
+    "either": 31,
+    "xor": 85,
+    "ifThen": 35,
+    "iff": 56,
+    "ifThenAnd": 41,
+    "allDifferent": -30,
+    "mixed": 84
+  },
+  "betaTime": {
+    "nextTo": -42,
+    "notNextTo": 23,
+    "immLeft": -67,
+    "immRight": -67,
+    "leftOf": 117,
+    "rightOf": 117,
+    "exactlyApart": 37,
+    "within": 130,
+    "atLeastApart": -25,
+    "between": -58,
+    "atEnd": -71,
+    "notAtEnd": -42,
+    "oneOf": 139,
+    "either": -1,
+    "xor": -112,
+    "ifThen": -6,
+    "iff": -133,
+    "ifThenAnd": 62,
+    "allDifferent": 108,
+    "mixed": -110
+  },
+  "bandWinners": {
+    "easy":   { "combo": ["atEnd", "between", "either", "ifThenAnd"],    "cap": 200, "capHit": 199, "inBandFraction": 0.53, "meanDiff": 203, "meanTime": 276 },
+    "medium": { "combo": ["atLeastApart", "iff", "notAtEnd", "rightOf"], "cap": 300, "capHit": 296, "inBandFraction": 0.75, "meanDiff": 231, "meanTime": 297 },
+    "hard":   { "combo": ["allDifferent", "iff", "immRight", "mixed"],   "cap": 400, "capHit": 400, "inBandFraction": 0.78, "meanDiff": 334, "meanTime": 248 },
+    "brutal": { "combo": ["mixed", "nextTo", "oneOf", "xor"],            "cap": null, "maxDiff": 926, "inBandFraction": 1.0, "meanDiff": 382, "meanTime": 277 }
+  },
+  "rotationPools": {
+    "easy": [
+      ["atEnd", "between", "either", "ifThenAnd"],
+      ["atEnd", "between", "either", "xor"],
+      ["between", "either", "iff", "within"]
+    ],
+    "medium": [
+      ["atLeastApart", "iff", "notAtEnd", "rightOf"],
+      ["exactlyApart", "mixed", "notAtEnd", "oneOf"],
+      ["exactlyApart", "iff", "immLeft", "immRight"]
+    ],
+    "hard": [
+      ["allDifferent", "iff", "immRight", "mixed"],
+      ["either", "exactlyApart", "mixed", "notNextTo"],
+      ["iff", "immLeft", "mixed", "notAtEnd"]
+    ],
+    "brutal": [
+      ["mixed", "nextTo", "oneOf", "xor"],
+      ["ifThenAnd", "iff", "rightOf", "xor"],
+      ["ifThen", "nextTo", "notNextTo", "xor"]
+    ]
+  }
+}
