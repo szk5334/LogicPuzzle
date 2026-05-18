@@ -1,8 +1,9 @@
 // Interestingness scoring — used by the sample-and-filter generator.
 //
-// Eight priority modes are available, each implementing a different notion of
+// Twelve priority modes are available, each implementing a different notion of
 // "best puzzle in the sample batch":
 //
+//   GENERAL-PURPOSE
 //   balance       — original scoring: passes × leverage + diversity − count penalty
 //   fewClues      — minimize clue count, lightly reward passes
 //   diversity     — maximize distinct clue types (quadratic)
@@ -11,6 +12,14 @@
 //   diffFewClues  — passes × leverage − 5 × clue count
 //   maxLeverage   — leverage² (per-clue derivation depth)
 //   bottleneck    — top-1 clue's share of trace DAG + 0.1 × leverage
+//
+//   BAND-CAPPED — pick the hardest puzzle whose difficulty score is ≤ cap.
+//   If no in-batch puzzle is under the cap, the closest above-cap is chosen.
+//   These power the easy/medium/hard/brutal presets in the dash card.
+//   bandEasy      — cap 200
+//   bandMedium    — cap 300
+//   bandHard      — cap 400
+//   bandBrutal    — no cap (equivalent to 'difficulty')
 //
 // scorePuzzle(puzzle, mode) is the entry point. scoreInterestingness(puzzle) is
 // kept as a back-compat alias = scorePuzzle(puzzle, 'balance').
@@ -25,11 +34,12 @@ function leverageOf(p) {
   return propDerivs / Math.max(m.clueCount, 1);
 }
 
-// DAG fanout per clue: how many trace facts ultimately depend on each clue.
-// For clue-sourced facts: count directly. For derived facts: walk source.deps
-// back until we hit a clue-sourced fact, then credit that clue. Returns the
-// top-1 share — the single most load-bearing clue's fraction of total
-// derivations. High top-1 share means one clue dominates the cascade.
+function rawDifficulty(p) {
+  const m = metricsFor(p);
+  return (m.passes ** 2) * leverageOf(p);
+}
+
+// DAG fanout per clue — see Batch 1 comment block.
 function bottleneckTopShare(puzzle) {
   const totalByClue = new Map();
   for (const c of puzzle.clues) totalByClue.set(c, 0);
@@ -58,8 +68,19 @@ function bottleneckTopShare(puzzle) {
   return Math.max(...vals) / sum;
 }
 
+// Band-capped score factory. Returns a function that:
+//   - returns puzzle's raw difficulty if ≤ cap (so best-of-N picks the hardest in-band)
+//   - returns -(diff - cap) - 100000 if above cap (so best-of-N picks the closest above-cap
+//     only if literally no in-band sample exists; any in-band sample beats any above-cap)
+function makeBandCapped(cap) {
+  return (p) => {
+    const d = rawDifficulty(p);
+    if (d <= cap) return d;
+    return -(d - cap) - 100000;
+  };
+}
+
 // ----- Priority-mode scoring functions -----
-// All take a fully-traced puzzle; higher = better fit.
 const SCORERS = {
   balance: (p) => {
     const m = metricsFor(p);
@@ -77,10 +98,7 @@ const SCORERS = {
     const m = metricsFor(p);
     return Object.keys(m.byClueType).length ** 2 + m.passes;
   },
-  difficulty: (p) => {
-    const m = metricsFor(p);
-    return (m.passes ** 2) * leverageOf(p);
-  },
+  difficulty: rawDifficulty,
   diffDiversity: (p) => {
     const m = metricsFor(p);
     return m.passes * leverageOf(p) + Object.keys(m.byClueType).length * 3;
@@ -91,10 +109,18 @@ const SCORERS = {
   },
   maxLeverage: (p) => leverageOf(p) ** 2,
   bottleneck: (p) => bottleneckTopShare(p) + leverageOf(p) * 0.1,
+
+  // Band-capped — UI cap matches difficultyToStars cutoffs in dashCardLogic.
+  bandEasy:   makeBandCapped(200),
+  bandMedium: makeBandCapped(300),
+  bandHard:   makeBandCapped(400),
+  bandBrutal: rawDifficulty,
 };
 
+// Cap values exported so the UI can display them next to the preset buttons.
+export const BAND_CAPS = { bandEasy: 200, bandMedium: 300, bandHard: 400, bandBrutal: Infinity };
+
 // Public registry — UI imports this to render the priority-mode picker.
-// Order here is the order shown in the dropdown.
 export const PRIORITY_MODES = [
   'balance',
   'fewClues',
@@ -104,28 +130,32 @@ export const PRIORITY_MODES = [
   'diffFewClues',
   'maxLeverage',
   'bottleneck',
+  'bandEasy',
+  'bandMedium',
+  'bandHard',
+  'bandBrutal',
 ];
 
-// Human-readable labels for the UI.
 export const PRIORITY_MODE_LABELS = {
   balance:       'Balanced',
   fewClues:      'Fewest clues',
   diversity:     'Most diverse',
-  difficulty:    'Hardest (passes × leverage)',
+  difficulty:    'Hardest (raw)',
   diffDiversity: 'Hard + diverse',
   diffFewClues:  'Hard + few clues',
   maxLeverage:   'Max leverage',
   bottleneck:    'Bottleneck (load-bearing)',
+  bandEasy:      'Easy band (≤200)',
+  bandMedium:    'Medium band (≤300)',
+  bandHard:      'Hard band (≤400)',
+  bandBrutal:    'Brutal (uncapped)',
 };
 
-// Score a puzzle under a chosen priority mode. Unknown mode falls back to balance.
 export function scorePuzzle(puzzle, mode = 'balance') {
   const scorer = SCORERS[mode] || SCORERS.balance;
   return scorer(puzzle);
 }
 
-// Back-compat alias — preserves the original API for App.jsx and SamplingPanel.
-// New code should call scorePuzzle(puzzle, mode) directly.
 export function scoreInterestingness(puzzle) {
   return SCORERS.balance(puzzle);
 }
