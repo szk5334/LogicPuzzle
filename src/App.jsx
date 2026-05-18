@@ -5,7 +5,9 @@ import { DEFAULT_SCRATCH_LABELS } from './utils.js';
 import { canonKey } from './engine/propagation.js';
 import { generatePuzzle } from './engine/generator.js';
 import { computePar, metricsFor } from './engine/par.js';
-import { scoreInterestingness } from './engine/scorer.js';
+// scoreInterestingness was the original balance-mode-only scorer. The dash
+// card lets the user pick a priority mode, so we call scorePuzzle(p, mode)
+// instead. scorePuzzle is imported alongside DashCard below.
 import { verifyMarks } from './engine/verify.js';
 import { hintTier1, hintTier2, hintTier3 } from './engine/hints.js';
 
@@ -21,6 +23,8 @@ import { TraceView, OptimalTraceView } from './UI/TraceView.jsx';
 import { Legend } from './UI/Legend.jsx';
 import { StaircaseGrid } from './UI/StaircaseGrid.jsx';
 import { SamplingPanel } from './UI/SamplingPanel.jsx';
+import { DashCard, DEFAULT_CONFIG, configToEngineFocus } from './UI/DashCard.jsx';
+import { scorePuzzle } from './engine/scorer.js';
 
 // ============================================================
 // UI
@@ -36,8 +40,11 @@ export default function App() {
   // narrower than the window on desktop).
   const gridPanelRef = useRef(null);
   const [themeKey, setThemeKey] = useState('soapOpera');
-  const [difficulty, setDifficulty] = useState('medium');
-  const [sampleCount, setSampleCount] = useState(10);
+  // Consolidated dash-card config drives difficulty, sample count, priority mode,
+  // type focus, and adaptive minimization. Defaults from DashCard.DEFAULT_CONFIG
+  // — the "normal distribution" centered settings.
+  const [dashConfig, setDashConfig] = useState(DEFAULT_CONFIG);
+  const { difficulty, sampleCount, priorityMode } = dashConfig;
   const [puzzle, setPuzzle] = useState(null);
   const [candidates, setCandidates] = useState(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -106,14 +113,23 @@ export default function App() {
 
     const accum = [];
     let i = 0;
+    // Resolve engine-facing knobs from the dash-card config. typeFocus may be a
+    // string ('natural'/'even'), an array, or { fixed, rotate } — generator.js
+    // handles all forms. The priority mode determines which scorer is used to
+    // rank samples; scorePuzzle dispatches.
+    const engineTypeFocus = configToEngineFocus(dashConfig);
+    const generateConfig = {
+      typeFocus: engineTypeFocus,
+      adaptiveMin: dashConfig.adaptiveMin,
+    };
     const step = () => {
       try {
         // Use the dropdown's theme directly here, not the puzzle-bound
         // `theme` variable above — a new generation should honor the
         // current dropdown selection, not the previous puzzle's theme.
-        const p = generatePuzzle(themes[themeKey], numCategories, numItems, difficulty);
+        const p = generatePuzzle(themes[themeKey], numCategories, numItems, difficulty, generateConfig);
         if (p.status === 'solved') {
-          p._score = scoreInterestingness(p);
+          p._score = scorePuzzle(p, priorityMode);
           p.par = computePar(p);
           p._themeKey = themeKey;  // bind for stable rendering across dropdown changes
           accum.push(p);
@@ -231,29 +247,13 @@ export default function App() {
                   ))}
                 </div>
               </div>
-              <div>
-                <div className="text-[11px] ink-faded uppercase tracking-widest mb-1.5">Difficulty bias</div>
-                <div className="flex gap-1">
-                  {['easy', 'medium', 'hard'].map((d) => (
-                    <button key={d} className={`ctrl-btn ${difficulty === d ? 'active' : ''}`} onClick={() => setDifficulty(d)}>
-                      {d}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <div className="text-[11px] ink-faded uppercase tracking-widest mb-1.5" title="Generate N candidates and keep the highest-scoring one.">
-                  Samples
-                </div>
-                <div className="flex gap-1">
-                  {[1, 5, 10, 25].map((n) => (
-                    <button key={n} className={`ctrl-btn ${sampleCount === n ? 'active' : ''}`} onClick={() => setSampleCount(n)}>
-                      {n}
-                    </button>
-                  ))}
-                </div>
-              </div>
             </div>
+
+            {/* Dash card — the rest of the puzzle-shaping dials live here */}
+            <div className="mt-6 max-w-md">
+              <DashCard config={dashConfig} onChange={setDashConfig} />
+            </div>
+
             <button onClick={generate} disabled={generating} className="btn-primary mt-6 font-mono text-sm">
               {generating ? `GENERATING ${progress.done}/${progress.total}...` : 'GENERATE PUZZLE'}
             </button>
