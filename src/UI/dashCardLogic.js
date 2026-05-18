@@ -1,6 +1,14 @@
-// DashCard logic — pure data and config-derivation, no JSX. Lives separately
-// from DashCard.jsx so it's importable from Node tests and from other JS
-// modules without needing a JSX transform.
+// DashCard logic — pure data and config-derivation. No JSX. Imported by both
+// DashCard.jsx and Node-based tests.
+//
+// IMPORTANT — DATA PROVENANCE
+// The TIME_PER_TYPE and DIFF_PER_TYPE tables below come from an OLS regression
+// against 1000 random 4-type combos at K=3 each. β values are CENTERED around
+// zero (representing each type's deviation from the average 4-type-combo
+// effect) and POOLED for true directional opposites (immLeft/immRight,
+// leftOf/rightOf get identical ratings by symmetry). See
+// /experiments/per_type_contributions.json and EXPERIMENTS.md for the full
+// derivation.
 
 // All clue types the engine emits, ordered by family for the custom checklist.
 export const ALL_TYPES = [
@@ -13,52 +21,61 @@ export const ALL_TYPES = [
   'allDifferent', 'unalignedPair', 'mixed',
 ];
 
-// ---------- Lookup tables from front-loaded experiments ----------
-// Time per single-type focus at hard band, 5×5 (ms). From the type-focus
-// sweep with K=15 each. Combos pool to ~200ms regardless; only single- or
-// dual-type focuses show the per-type cost meaningfully.
+// ---------- Lookup tables from 1000-combo OLS regression ----------
+// β-time: marginal time contribution (ms) of adding this type to a 4-type combo,
+// centered. Negative = faster than average; positive = slower.
+// β-diff: same for difficulty score, centered around zero.
+// Types not in the 20-type regression set (is, not, unalignedPair) use
+// extrapolated values from the earlier single-type-focus experiments.
 export const TIME_PER_TYPE = {
-  is: 246, not: 230,
-  nextTo: 178, notNextTo: 223, immLeft: 130, immRight: 184,
-  leftOf: 339, rightOf: 339, exactlyApart: 185, within: 460,
-  atLeastApart: 210, between: 235, atEnd: 261, notAtEnd: 322,
-  oneOf: 1187, either: 463, xor: 274, ifThen: 395, iff: 254,
-  ifThenAnd: 600, mixed: 308, allDifferent: 609, unalignedPair: 92,
+  // From 1000-combo regression (centered β-time):
+  nextTo: -42, notNextTo: 23, immLeft: -67, immRight: -67,
+  leftOf: 117, rightOf: 117,
+  exactlyApart: 37, within: 130, atLeastApart: -25, between: -58,
+  atEnd: -71, notAtEnd: -42,
+  oneOf: 139, either: -1, xor: -112, ifThen: -6, iff: -133, ifThenAnd: 62,
+  allDifferent: 108, mixed: -110,
+  // Not in regression — single-focus values centered toward typical range:
+  is: -20, not: -30, unalignedPair: -150,
 };
 
-// Difficulty score per single-type focus.
 export const DIFF_PER_TYPE = {
-  is: 38, not: 35,
-  nextTo: 259, notNextTo: 276, immLeft: 212, immRight: 170,
-  leftOf: 156, rightOf: 163, exactlyApart: 213, within: 128,
-  atLeastApart: 158, between: 124, atEnd: 162, notAtEnd: 150,
-  oneOf: 409, either: 282, xor: 277, ifThen: 287, iff: 349,
-  ifThenAnd: 197, mixed: 320, allDifferent: 67, unalignedPair: 28,
+  // From 1000-combo regression (centered β-diff):
+  nextTo: -23, notNextTo: -6, immLeft: -11, immRight: -11,
+  leftOf: -7, rightOf: -7,
+  exactlyApart: -10, within: -8, atLeastApart: -35, between: -39,
+  atEnd: -90, notAtEnd: -56,
+  oneOf: 1, either: 31, xor: 85, ifThen: 35, iff: 56, ifThenAnd: 41,
+  allDifferent: -30, mixed: 84,
+  // Not in regression:
+  is: -120, not: -120, unalignedPair: -150,
 };
 
-// Difficulty arrows for the checklist UI. Bins selected to spread the 22
-// emitting types across six visible buckets.
+// Difficulty arrows. Bins on the CENTERED β scale (β > 0 = above average).
 export function diffArrow(t) {
-  const d = DIFF_PER_TYPE[t] ?? 200;
-  if (d >= 340) return { mark: '↑↑↑', cls: 'arrow-up3' };
-  if (d >= 260) return { mark: '↑↑',  cls: 'arrow-up2' };
-  if (d >= 190) return { mark: '↑',   cls: 'arrow-up1' };
-  if (d >= 140) return { mark: '=',   cls: 'arrow-flat' };
-  if (d >= 100) return { mark: '↓',   cls: 'arrow-dn1' };
-  return                      { mark: '↓↓',  cls: 'arrow-dn2' };
+  const d = DIFF_PER_TYPE[t] ?? 0;
+  if (d >=  50) return { mark: '↑↑↑', cls: 'arrow-up3' };
+  if (d >=  25) return { mark: '↑↑',  cls: 'arrow-up2' };
+  if (d >=  10) return { mark: '↑',   cls: 'arrow-up1' };
+  if (d >  -10) return { mark: '=',   cls: 'arrow-flat' };
+  if (d >  -25) return { mark: '↓',   cls: 'arrow-dn1' };
+  if (d >  -50) return { mark: '↓↓',  cls: 'arrow-dn2' };
+  return                       { mark: '↓↓↓', cls: 'arrow-dn3' };
 }
 
+// Time arrows. Centered β; negative = faster than average.
 export function timeArrow(t) {
-  const ms = TIME_PER_TYPE[t] ?? 250;
-  if (ms >= 800) return { mark: '↑↑↑', cls: 'arrow-up3' };
-  if (ms >= 500) return { mark: '↑↑',  cls: 'arrow-up2' };
-  if (ms >= 400) return { mark: '↑',   cls: 'arrow-up1' };
-  if (ms >= 250) return { mark: '=',   cls: 'arrow-flat' };
-  if (ms >= 150) return { mark: '↓',   cls: 'arrow-dn1' };
-  return                       { mark: '↓↓',  cls: 'arrow-dn2' };
+  const ms = TIME_PER_TYPE[t] ?? 0;
+  if (ms >=  100) return { mark: '↑↑↑', cls: 'arrow-up3' };
+  if (ms >=   50) return { mark: '↑↑',  cls: 'arrow-up2' };
+  if (ms >=   20) return { mark: '↑',   cls: 'arrow-up1' };
+  if (ms >   -20) return { mark: '=',   cls: 'arrow-flat' };
+  if (ms >   -50) return { mark: '↓',   cls: 'arrow-dn1' };
+  if (ms >  -100) return { mark: '↓↓',  cls: 'arrow-dn2' };
+  return                        { mark: '↓↓↓', cls: 'arrow-dn3' };
 }
 
-// Difficulty band cutoffs for the ★ rating in the running estimate.
+// Star rating cutoffs aligned with band caps (200/300/400/420).
 export function diffToStars(d) {
   if (d >= 420) return '★★★★★';
   if (d >= 340) return '★★★★☆';
@@ -69,11 +86,14 @@ export function diffToStars(d) {
 }
 
 // ---------- Estimate model ----------
-// Directional only. Time and difficulty depend on RNG, theme, and the
-// interaction between difficulty band and type focus. The model is calibrated
-// from the front-loaded experiments. Treat as ballpark, not commitment.
+// The intercept of the centered regression is ~395 (mean diff across all
+// 4-type combos). For a custom combo: predicted = 395 + Σ β. For natural:
+// see lookup. Best-of-K boost is empirical.
+const REGRESSION_INTERCEPT_DIFF = 395;
+const REGRESSION_INTERCEPT_TIME = 280;
+
 export function estimateMetrics(config) {
-  const { difficulty, sampleCount, typeFocusMode, customAssignments, adaptiveMin } = config;
+  const { difficulty, sampleCount, typeFocusMode, customAssignments, adaptiveMin, priorityMode } = config;
 
   // ----- Per-sample time -----
   let msPerSample;
@@ -87,16 +107,21 @@ export function estimateMetrics(config) {
     const pool = [...fixed, ...rotate];
     if (pool.length === 0) {
       msPerSample = 250;
+    } else if (pool.length >= 4) {
+      // Use the regression-predicted time for the combo (sum of β + intercept).
+      // For rotating: average over the rotate pool with fixed members locked.
+      const fixedSum = fixed.reduce((s, t) => s + (TIME_PER_TYPE[t] ?? 0), 0);
+      const rotateMean = rotate.length > 0
+        ? rotate.reduce((s, t) => s + (TIME_PER_TYPE[t] ?? 0), 0) / rotate.length
+        : 0;
+      const otherSum = fixed.length + (rotate.length > 0 ? 1 : 0) === 4
+        ? fixedSum + rotateMean
+        : (fixedSum + rotateMean * Math.max(0, 4 - fixed.length));
+      msPerSample = Math.max(120, Math.round(REGRESSION_INTERCEPT_TIME + otherSum));
     } else {
-      const avg = pool.reduce((s, t) => s + (TIME_PER_TYPE[t] ?? 250), 0) / pool.length;
-      // Pooling discount — empirically: 3+ types → ~0.5× of per-type-mean,
-      // because per-puzzle the focused pool stays plentiful and the
-      // generator never has to fall back to the 10% deadlock floor.
-      const discount = pool.length >= 4 ? 0.45
-                     : pool.length === 3 ? 0.50
-                     : pool.length === 2 ? 0.70
-                     : 1.00;
-      msPerSample = Math.max(120, Math.round(avg * discount));
+      // 1–3 type focus: scale by pool size; less reliable
+      const avg = pool.reduce((s, t) => s + (TIME_PER_TYPE[t] ?? 0), 0) / pool.length;
+      msPerSample = Math.max(120, Math.round(REGRESSION_INTERCEPT_TIME + avg * 1.5));
     }
   }
   if (adaptiveMin) msPerSample = Math.round(msPerSample * 0.98);
@@ -111,13 +136,32 @@ export function estimateMetrics(config) {
     const fixed = Object.keys(customAssignments).filter((t) => customAssignments[t] === 'fixed');
     const rotate = Object.keys(customAssignments).filter((t) => customAssignments[t] === 'rotate');
     const pool = [...fixed, ...rotate];
-    if (pool.length === 0) baseDiff = 220;
-    else baseDiff = pool.reduce((s, t) => s + (DIFF_PER_TYPE[t] ?? 200), 0) / pool.length;
+    if (pool.length === 0) {
+      baseDiff = REGRESSION_INTERCEPT_DIFF;
+    } else if (pool.length >= 4) {
+      const fixedSum = fixed.reduce((s, t) => s + (DIFF_PER_TYPE[t] ?? 0), 0);
+      const rotateMean = rotate.length > 0
+        ? rotate.reduce((s, t) => s + (DIFF_PER_TYPE[t] ?? 0), 0) / rotate.length
+        : 0;
+      const otherSum = fixed.length + (rotate.length > 0 ? 1 : 0) === 4
+        ? fixedSum + rotateMean
+        : (fixedSum + rotateMean * Math.max(0, 4 - fixed.length));
+      baseDiff = REGRESSION_INTERCEPT_DIFF + otherSum;
+    } else {
+      const avg = pool.reduce((s, t) => s + (DIFF_PER_TYPE[t] ?? 0), 0) / pool.length;
+      baseDiff = REGRESSION_INTERCEPT_DIFF + avg * 1.5;
+    }
   }
   // Best-of-K boost. Empirical: chosen mean ≈ base × (1 + 0.5·log10(K)).
-  // K=1 → 1.0× | K=5 → 1.35× | K=10 → 1.5× | K=25 → 1.7× | K=100 → 2.0×
   const bestOfBoost = 1 + 0.5 * Math.log10(Math.max(sampleCount, 1));
-  const finalDiff = Math.round(baseDiff * bestOfBoost);
+  let finalDiff = Math.round(baseDiff * bestOfBoost);
+
+  // Band-capped priority modes constrain the chosen puzzle to a band cap.
+  // Reflect that in the estimate.
+  const CAPS = { bandEasy: 200, bandMedium: 300, bandHard: 400 };
+  if (priorityMode && CAPS[priorityMode] != null) {
+    finalDiff = Math.min(finalDiff, CAPS[priorityMode]);
+  }
 
   return {
     msPerSample,
@@ -128,85 +172,159 @@ export function estimateMetrics(config) {
 }
 
 // ---------- Resolve engine typeFocus from UI state ----------
-// generator.js accepts a string, array, or { fixed, rotate } object.
-// The UI's `typeFocusMode` + `customAssignments` map to one of those forms.
 export function configToEngineFocus(config) {
   if (config.typeFocusMode === 'natural') return 'natural';
   if (config.typeFocusMode === 'even') return 'even';
-  // custom mode
   const fixed = ALL_TYPES.filter((t) => config.customAssignments[t] === 'fixed');
   const rotate = ALL_TYPES.filter((t) => config.customAssignments[t] === 'rotate');
   if (rotate.length > 0) return { fixed, rotate };
   if (fixed.length > 0) return fixed;
-  return 'even'; // empty custom → same as even
+  return 'even';
+}
+
+// Helper: turn a 4-type array into a customAssignments map (all fixed).
+function asFixed(types) {
+  const obj = {};
+  for (const t of types) obj[t] = 'fixed';
+  return obj;
 }
 
 // ---------- Presets ----------
-// Each preset is a fully-specified config that overwrites all dash-card state
-// when clicked. Notes explain why this preset exists.
+// CURATED bands: each preset is a verified 4-type combo + the matching
+// band-capped priority mode. Winners come from K=40 verification on 1000
+// random combos. See /experiments/band_winners.json.
+//
+// NATURAL bands: no type restriction; the difficulty band controls clue
+// weights via the WEIGHTS table in generator.js. Same band-capped scoring.
 export const PRESETS = {
-  classic: {
-    label: 'Classic',
-    note: 'Balanced default — medium hard, natural type mix.',
+  // ----- Curated 4-type presets -----
+  easy: {
+    label: 'Easy',
+    group: 'curated',
+    note: 'Curated combo · cap 200 · K=40 verified',
     config: {
-      difficulty: 'medium',
-      priorityMode: 'balance',
-      sampleCount: 10,
-      typeFocusMode: 'natural',
-      customAssignments: {},
+      difficulty: 'hard',
+      priorityMode: 'bandEasy',
+      sampleCount: 100,
+      typeFocusMode: 'custom',
+      customAssignments: asFixed(['atEnd', 'between', 'either', 'ifThenAnd']),
+      adaptiveMin: true,
+    },
+  },
+  medium: {
+    label: 'Medium',
+    group: 'curated',
+    note: 'Curated combo · cap 300 · K=40 verified',
+    config: {
+      difficulty: 'hard',
+      priorityMode: 'bandMedium',
+      sampleCount: 100,
+      typeFocusMode: 'custom',
+      customAssignments: asFixed(['atLeastApart', 'iff', 'notAtEnd', 'rightOf']),
+      adaptiveMin: true,
+    },
+  },
+  hard: {
+    label: 'Hard',
+    group: 'curated',
+    note: 'Curated combo · cap 400 · K=40 verified · capHit=400 exactly',
+    config: {
+      difficulty: 'hard',
+      priorityMode: 'bandHard',
+      sampleCount: 100,
+      typeFocusMode: 'custom',
+      customAssignments: asFixed(['allDifferent', 'iff', 'immRight', 'mixed']),
       adaptiveMin: true,
     },
   },
   brutal: {
     label: 'Brutal',
-    // iff/mixed/xor are the top-3 single-type-difficulty operators that
-    // generate quickly. The 9 rotate-pool members each pushed p90 ≥ 640 in
-    // a K=50 trio+wildcard experiment. Rotating gives each call a slightly
-    // different shape, so the 100-sample run finds at least one outlier.
-    note: 'iff + mixed + xor + rotating 4th from 9 hard wildcards. 100 samples.',
+    group: 'curated',
+    note: 'Curated combo · uncapped · K=40 max=926',
     config: {
       difficulty: 'hard',
-      priorityMode: 'difficulty',
-      sampleCount: 100,
+      priorityMode: 'bandBrutal',
+      sampleCount: 500,
       typeFocusMode: 'custom',
-      customAssignments: {
-        iff: 'fixed', mixed: 'fixed', xor: 'fixed',
-        notNextTo: 'rotate', exactlyApart: 'rotate', ifThenAnd: 'rotate',
-        ifThen: 'rotate', nextTo: 'rotate', oneOf: 'rotate',
-        either: 'rotate', leftOf: 'rotate', immLeft: 'rotate',
-      },
+      customAssignments: asFixed(['mixed', 'nextTo', 'oneOf', 'xor']),
       adaptiveMin: true,
     },
   },
-  fewClues: {
-    label: 'Sparse',
-    note: 'Hardest puzzles with the fewest clues. Priority = fewClues.',
+
+  // ----- Natural-distribution bands (no type restriction) -----
+  naturalEasy: {
+    label: 'Easy (natural)',
+    group: 'natural',
+    note: 'No type restriction · cap 200',
     config: {
-      difficulty: 'hard',
-      priorityMode: 'fewClues',
+      difficulty: 'easy',
+      priorityMode: 'bandEasy',
       sampleCount: 25,
       typeFocusMode: 'natural',
       customAssignments: {},
       adaptiveMin: true,
     },
   },
-  diverse: {
-    label: 'Diverse',
-    note: 'Maximize the variety of clue types. Even spread + diversity scorer.',
+  naturalMedium: {
+    label: 'Medium (natural)',
+    group: 'natural',
+    note: 'No type restriction · cap 300',
+    config: {
+      difficulty: 'medium',
+      priorityMode: 'bandMedium',
+      sampleCount: 25,
+      typeFocusMode: 'natural',
+      customAssignments: {},
+      adaptiveMin: true,
+    },
+  },
+  naturalHard: {
+    label: 'Hard (natural)',
+    group: 'natural',
+    note: 'No type restriction · cap 400',
     config: {
       difficulty: 'hard',
-      priorityMode: 'diversity',
+      priorityMode: 'bandHard',
       sampleCount: 25,
-      typeFocusMode: 'even',
+      typeFocusMode: 'natural',
       customAssignments: {},
       adaptiveMin: true,
     },
   },
 };
 
-// Default config — the "normal distribution" landing point you asked for.
-// Medium difficulty, balanced scoring, natural type mix, sane sample count.
-// Lands at ~250 difficulty / ★★★☆☆ per the front-loaded estimates.
+// Pre-sorted preset groups for the UI.
+export const PRESET_GROUPS = {
+  curated: ['easy', 'medium', 'hard', 'brutal'],
+  natural: ['naturalEasy', 'naturalMedium', 'naturalHard'],
+};
+
+// Rotation pools per band — top 3 verified combos per band, for future
+// "even mix" curation paths that progress through varied puzzle shapes.
+export const BAND_ROTATION_POOLS = {
+  easy: [
+    ['atEnd', 'between', 'either', 'ifThenAnd'],
+    ['atEnd', 'between', 'either', 'xor'],
+    ['between', 'either', 'iff', 'within'],
+  ],
+  medium: [
+    ['atLeastApart', 'iff', 'notAtEnd', 'rightOf'],
+    ['exactlyApart', 'mixed', 'notAtEnd', 'oneOf'],
+    ['exactlyApart', 'iff', 'immLeft', 'immRight'],
+  ],
+  hard: [
+    ['allDifferent', 'iff', 'immRight', 'mixed'],
+    ['either', 'exactlyApart', 'mixed', 'notNextTo'],
+    ['iff', 'immLeft', 'mixed', 'notAtEnd'],
+  ],
+  brutal: [
+    ['mixed', 'nextTo', 'oneOf', 'xor'],
+    ['ifThenAnd', 'iff', 'rightOf', 'xor'],
+    ['ifThen', 'nextTo', 'notNextTo', 'xor'],
+  ],
+};
+
+// Default config — Classic Balanced, centered defaults.
 export const DEFAULT_CONFIG = {
   difficulty: 'medium',
   priorityMode: 'balance',
@@ -215,3 +333,6 @@ export const DEFAULT_CONFIG = {
   customAssignments: {},
   adaptiveMin: true,
 };
+
+// Allowed sample counts for the dash card.
+export const SAMPLE_COUNTS = [1, 5, 10, 25, 100, 500];

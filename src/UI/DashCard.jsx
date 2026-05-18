@@ -7,7 +7,7 @@
 //   onChange: setter — receives the next full config object
 
 import { useMemo } from 'react';
-import { PRIORITY_MODES, PRIORITY_MODE_LABELS } from '../engine/scorer.js';
+import { PRIORITY_MODES, PRIORITY_MODE_LABELS, BAND_CAPS } from '../engine/scorer.js';
 import {
   ALL_TYPES,
   TIME_PER_TYPE,
@@ -16,6 +16,8 @@ import {
   timeArrow,
   estimateMetrics,
   PRESETS,
+  PRESET_GROUPS,
+  SAMPLE_COUNTS,
 } from './dashCardLogic.js';
 
 // Re-export commonly imported pieces so App.jsx can import everything from
@@ -44,20 +46,47 @@ export function DashCard({ config, onChange }) {
   return (
     <div className="space-y-4 text-sm">
 
-      {/* Presets — clicking overwrites the entire config */}
+      {/* Presets — clicking overwrites the entire config. Two groups:
+          Curated (verified 4-type combos targeting specific difficulty bands)
+          and Natural (no type restriction, difficulty band drives WEIGHTS). */}
       <div>
-        <div className="text-[11px] ink-faded uppercase tracking-widest mb-1.5">Presets</div>
+        <div className="text-[11px] ink-faded uppercase tracking-widest mb-1.5">Presets — curated</div>
+        <div className="flex gap-1 flex-wrap mb-2">
+          {PRESET_GROUPS.curated.map((key) => {
+            const preset = PRESETS[key];
+            const cap = BAND_CAPS[preset.config.priorityMode];
+            const capLabel = cap === Infinity ? '∞' : cap;
+            return (
+              <button
+                key={key}
+                className="ctrl-btn"
+                title={`${preset.note}\nCap: ${capLabel}`}
+                onClick={() => onChange({ ...preset.config })}
+              >
+                {preset.label}
+                <span className="ink-faded ml-1 text-[10px]">≤{capLabel}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="text-[11px] ink-faded uppercase tracking-widest mb-1.5">Presets — natural</div>
         <div className="flex gap-1 flex-wrap">
-          {Object.entries(PRESETS).map(([key, preset]) => (
-            <button
-              key={key}
-              className="ctrl-btn"
-              title={preset.note}
-              onClick={() => onChange({ ...preset.config })}
-            >
-              {preset.label}
-            </button>
-          ))}
+          {PRESET_GROUPS.natural.map((key) => {
+            const preset = PRESETS[key];
+            const cap = BAND_CAPS[preset.config.priorityMode];
+            const capLabel = cap === Infinity ? '∞' : cap;
+            return (
+              <button
+                key={key}
+                className="ctrl-btn"
+                title={`${preset.note}\nCap: ${capLabel}`}
+                onClick={() => onChange({ ...preset.config })}
+              >
+                {preset.label}
+                <span className="ink-faded ml-1 text-[10px]">≤{capLabel}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -99,8 +128,8 @@ export function DashCard({ config, onChange }) {
       {/* Sample count — N for the best-of-N sampling loop */}
       <div>
         <div className="text-[11px] ink-faded uppercase tracking-widest mb-1.5">Samples</div>
-        <div className="flex gap-1">
-          {[1, 5, 10, 25, 100].map((n) => (
+        <div className="flex gap-1 flex-wrap">
+          {SAMPLE_COUNTS.map((n) => (
             <button
               key={n}
               className={`ctrl-btn ${config.sampleCount === n ? 'active' : ''}`}
