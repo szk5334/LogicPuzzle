@@ -1,11 +1,23 @@
 export function SamplingPanel({ candidates, selected }) {
-  // candidates is sorted desc by _score.
-  const scores = candidates.map((c) => c._score);
-  const max = Math.max(...scores);
-  const min = Math.min(...scores);
+  // candidates is sorted desc by _score (the active priority-mode score).
+  // For display we use _difficulty (raw passes²×leverage) so the numbers are
+  // meaningful regardless of priority mode — band-capped modes return huge
+  // negative penalty values for above-cap samples, which would otherwise
+  // break the histogram.
+  const diffs = candidates.map((c) => c._difficulty);
+  const max = Math.max(...diffs);
+  const min = Math.min(...diffs);
   const range = Math.max(max - min, 0.0001);
-  const median = scores[Math.floor(scores.length / 2)];
-  const selectedScore = selected._score;
+  // Median by raw difficulty (sort a copy — candidates ordering by _score is
+  // not the same as the difficulty rank under band-capped modes).
+  const sortedDiffs = [...diffs].sort((a, b) => a - b);
+  const median = sortedDiffs[Math.floor(sortedDiffs.length / 2)];
+  const selectedDiff = selected._difficulty;
+  // Selected's position when ranked by raw difficulty desc — tells the user
+  // "the selected puzzle is the Nth hardest in the batch" even when the
+  // priority mode put it first via a different criterion.
+  const sortedDesc = [...diffs].sort((a, b) => b - a);
+  const selectedRank = sortedDesc.indexOf(selectedDiff) + 1;
 
   return (
     <section>
@@ -14,7 +26,10 @@ export function SamplingPanel({ candidates, selected }) {
         <div className="flex flex-wrap gap-x-8 gap-y-2 text-xs font-mono mb-4">
           <div>
             <span className="ink-faded">selected </span>
-            <span className="ink-red font-bold text-base">{selectedScore.toFixed(1)}</span>
+            <span className="ink-red font-bold text-base">{selectedDiff.toFixed(1)}</span>
+            {selectedRank > 1 && (
+              <span className="ink-faded ml-1">(rank #{selectedRank} by difficulty)</span>
+            )}
           </div>
           <div>
             <span className="ink-faded">median </span>
@@ -29,10 +44,12 @@ export function SamplingPanel({ candidates, selected }) {
             <span className="ink">{candidates.length}</span>
           </div>
         </div>
-        {/* Histogram: one bar per candidate, sorted desc, selected highlighted */}
+        {/* Histogram: one bar per candidate, ordered as the active priority
+            mode ranked them (sort-desc by _score). Bar height encodes raw
+            difficulty. The leftmost bar is the chosen winner. */}
         <div className="flex items-end gap-1" style={{ height: 60 }}>
-          {scores.map((s, i) => {
-            const h = ((s - min) / range) * 56 + 4;
+          {diffs.map((d, i) => {
+            const h = ((d - min) / range) * 56 + 4;
             const isTop = i === 0;
             return (
               <div
@@ -43,13 +60,17 @@ export function SamplingPanel({ candidates, selected }) {
                   flexShrink: 0,
                   background: isTop ? '#8b1a1a' : 'rgba(138, 121, 96, 0.5)',
                 }}
-                title={`#${i + 1}: ${s.toFixed(2)}`}
+                title={`#${i + 1} by priority: difficulty ${d.toFixed(2)}`}
               />
             );
           })}
         </div>
         <div className="mt-3 text-[11px] ink-faded italic font-display leading-snug max-w-2xl">
-          Score = passes × leverage + 2·diversity − clue-count penalty. Leverage is cascade derivations per clue; high values mean each clue powers a lot of follow-on facts. A wide range here is the sampling filter doing real work — without it you'd get whichever puzzle generated first, not the most cascade-rich one.
+          Difficulty is passes² × leverage — the depth and breadth of cascade
+          a solver must follow. The histogram orders candidates by the active
+          priority mode; bar height shows raw difficulty. A wide range means
+          the sampling filter is doing real work — without it you'd take the
+          first puzzle generated, not the chosen one.
         </div>
       </div>
     </section>

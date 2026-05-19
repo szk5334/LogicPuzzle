@@ -6,7 +6,6 @@
 //   config:   the full dash-card state (see DEFAULT_CONFIG)
 //   onChange: setter — receives the next full config object
 
-import { useMemo } from 'react';
 import { PRIORITY_MODES, PRIORITY_MODE_LABELS, BAND_CAPS } from '../engine/scorer.js';
 import {
   ALL_TYPES,
@@ -14,18 +13,18 @@ import {
   DIFF_PER_TYPE,
   diffArrow,
   timeArrow,
-  estimateMetrics,
   PRESETS,
   PRESET_GROUPS,
   SAMPLE_COUNTS,
 } from './dashCardLogic.js';
 
 // Re-export commonly imported pieces so App.jsx can import everything from
-// './UI/DashCard.jsx' as before.
+// './UI/DashCard.jsx' as before. estimateMetrics is still exported for
+// programmatic callers, even though the UI no longer displays an estimate
+// inline — it remains available for future curation tooling.
 export { configToEngineFocus, DEFAULT_CONFIG, estimateMetrics, PRESETS, ALL_TYPES } from './dashCardLogic.js';
 
 export function DashCard({ config, onChange }) {
-  const estimate = useMemo(() => estimateMetrics(config), [config]);
   const set = (patch) => onChange({ ...config, ...patch });
 
   // Cycle a single type through off → fixed → rotate → off. Deletes the key
@@ -221,23 +220,6 @@ export function DashCard({ config, onChange }) {
         <span className="text-[10px] ink-faded ml-2 font-mono">
           early-exit zero-drop minimizer passes (~2% faster)
         </span>
-      </div>
-
-      {/* Running estimate — recomputes from lookup tables whenever config changes */}
-      <div className="border-t border-current/15 pt-3 mt-2">
-        <div className="text-[11px] ink-faded uppercase tracking-widest mb-1.5">Estimate</div>
-        <div className="font-mono text-xs space-y-0.5">
-          <div>
-            ~{estimate.msPerSample}ms × {config.sampleCount} samples =
-            <span className="ink ml-1">
-              ~{estimate.totalMs >= 1000 ? `${(estimate.totalMs / 1000).toFixed(1)}s` : `${estimate.totalMs}ms`}
-            </span>
-          </div>
-          <div>
-            difficulty: <span className="ink">{estimate.stars}</span>
-            <span className="ink-faded ml-2">(~{estimate.difficulty})</span>
-          </div>
-        </div>
       </div>
     </div>
   );
