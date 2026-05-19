@@ -12,10 +12,30 @@
 // axes) but reads awkwardly enough that themes are nudged to flavor their
 // frequently-used axes.
 //
-// Phase 3 will add a RenderContext parameter so cross-puzzle atoms can be labeled
-// with → ⁿ superscript notation. The single-puzzle signature stays compatible.
+// Phase 3 RenderContext (scaffolding; no current callers pass it):
+//   renderClueShared(c, theme, ctx?) accepts an optional ctx = { puzzleId }.
+//   When an atom inside a clue carries a `puzzleId` that differs from
+//   `ctx.puzzleId`, the rendered atom text gets a cross-puzzle marker
+//   appended: ` (→<puzzleId>)`. The marker is provisional — we may swap in
+//   a JSX <sup> styling once a case-aware UI exists.
+//
+//   Themes' renderClue(c, ctx?) forwards ctx through unchanged. UI call sites
+//   that don't yet know about cases pass no ctx; their atoms also lack
+//   puzzleId, so the output is byte-identical to before this scaffolding.
+//   Positional clues, allDifferent, and unalignedPair are local-only by
+//   Phase 3 design and don't consult ctx.
 
 import { capit } from '../utils.js';
+
+// Apply the cross-puzzle annotation to atom text when the atom belongs to a
+// puzzle other than the current rendering context. Provisional notation —
+// final styling lives wherever this string is finally rendered.
+function annotateCross(text, atomOrClue, ctx) {
+  const pid = atomOrClue && atomOrClue.puzzleId;
+  if (pid == null) return text;
+  if (ctx && ctx.puzzleId === pid) return text; // same puzzle, no marker
+  return `${text} (→${pid})`;
+}
 
 // Generic prose skeleton for positional clues whose theme returned null —
 // either the theme doesn't know about this axis, or it doesn't handle this
@@ -52,10 +72,15 @@ function renderPositionalNonAnchor(c, theme) {
   }
 }
 
-export function renderClueShared(c, theme) {
+export function renderClueShared(c, theme, ctx) {
+  ctx = ctx || { puzzleId: null };
   const phrase = (cat, x) => theme.phrase(cat, x);
   const propLine = (catA, a, catB, b, pol) => theme.propLine(catA, a, catB, b, pol);
-  const renderAtom = (atom) => propLine(atom.catA, atom.a, atom.catB, atom.b, atom.polarity);
+  const renderAtom = (atom) => annotateCross(
+    propLine(atom.catA, atom.a, atom.catB, atom.b, atom.polarity),
+    atom,
+    ctx,
+  );
   const renderFormula = (f) => {
     if (f.kind === 'atom') return renderAtom(f);
     if (f.kind === 'not') return `it is NOT the case that (${renderFormula(f.child)})`;
@@ -88,8 +113,8 @@ export function renderClueShared(c, theme) {
   };
 
   switch (c.type) {
-    case 'is':      return capit(propLine(c.catA, c.a, c.catB, c.b, 'yes')) + '.';
-    case 'not':     return capit(propLine(c.catA, c.a, c.catB, c.b, 'no')) + '.';
+    case 'is':      return annotateCross(capit(propLine(c.catA, c.a, c.catB, c.b, 'yes')), c, ctx) + '.';
+    case 'not':     return annotateCross(capit(propLine(c.catA, c.a, c.catB, c.b, 'no')),  c, ctx) + '.';
     case 'nextTo':
     case 'notNextTo':
     case 'immLeft':
@@ -115,7 +140,8 @@ export function renderClueShared(c, theme) {
       const joined = opts.length === 2
         ? `${opts[0]} or ${opts[1]}`
         : `${opts.slice(0, -1).join(', ')}, or ${opts[opts.length - 1]}`;
-      return `${capit(phrase(head.catA, head.a))} is one of: ${joined}.`;
+      const subj = annotateCross(capit(phrase(head.catA, head.a)), head, ctx);
+      return `${subj} is one of: ${joined}.`;
     }
     case 'either': {
       const [p1, p2] = c.formula.children;

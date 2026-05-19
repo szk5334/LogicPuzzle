@@ -118,7 +118,7 @@ export const themes = {
         default: return null;
       }
     },
-    renderClue(c) { return renderClueShared(c, this); },
+    renderClue(c, ctx) { return renderClueShared(c, this, ctx); },
   },
   soapOpera: {
     name: 'soapOpera',
@@ -274,7 +274,7 @@ export const themes = {
       }
       return null;
     },
-    renderClue(c) { return renderClueShared(c, this); },
+    renderClue(c, ctx) { return renderClueShared(c, this, ctx); },
   },
   noir: {
     name: 'noir',
@@ -413,6 +413,6 @@ export const themes = {
       }
       return null;
     },
-    renderClue(c) { return renderClueShared(c, this); },
+    renderClue(c, ctx) { return renderClueShared(c, this, ctx); },
   },
 };
