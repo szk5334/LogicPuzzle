@@ -9,6 +9,22 @@
 // pushFact is the entry point for every fact: clue propagators call it, the
 // solver seeds it for marks, and the cascades feed it via the internal queue.
 // All trace entries are appended in derivation order.
+//
+// Phase 3 cross-puzzle plumbing (scaffolding only; no current callers):
+//   - A table may be tagged with a `puzzleId`. Facts stored in that table are
+//     stamped with the same `puzzleId` so downstream consumers (proof DAGs,
+//     case-graph rendering) know which puzzle a fact belongs to.
+//   - A table may carry a `crossPuzzleState` reference: a read-only
+//     Map<canonKey, Fact> of atoms known from OTHER puzzles in the same case.
+//     Future cross-puzzle clue propagators will consult it; the current
+//     in-puzzle solver never reads from it.
+//   - canonKey accepts an optional 5th `puzzleId` argument used by callers
+//     constructing keys for crossPuzzleState lookups. Local-table operations
+//     omit it (atoms in a single table all share the table's puzzleId, so the
+//     key prefix is redundant).
+//
+// All Phase 3 additions are opt-in. Tables created without `opts` behave
+// exactly as before — no puzzleId stamping, no crossPuzzleState lookups.
 
 export const rand = (max) => Math.floor(Math.random() * max);
 
@@ -23,17 +39,34 @@ export function shuffle(arr) {
 
 // ----- Constraint table -----
 // Canonical key normalizes (catA,a,catB,b) so order doesn't matter.
-export function canonKey(catA, a, catB, b) {
-  if (catA <= catB) return `${catA}=${a}|${catB}=${b}`;
-  return `${catB}=${b}|${catA}=${a}`;
+// When a puzzleId is supplied (5th arg), the key is namespaced — used by
+// cross-puzzle clue propagators looking up atoms in `table.crossPuzzleState`.
+// 4-arg calls are unchanged.
+export function canonKey(catA, a, catB, b, puzzleId) {
+  const base = (catA <= catB)
+    ? `${catA}=${a}|${catB}=${b}`
+    : `${catB}=${b}|${catA}=${a}`;
+  return puzzleId != null ? `${puzzleId}::${base}` : base;
 }
 
-export function makeTable(categories) {
-  return { categories, facts: new Map() };
+// makeTable accepts an optional opts = { puzzleId, crossPuzzleState }.
+//   puzzleId          — tag for facts stored in this table (Phase 3)
+//   crossPuzzleState  — read-only Map<canonKey, Fact> of atoms from other
+//                       puzzles. Inert today; future cross-puzzle clue
+//                       propagators will consult `table.crossPuzzleState`.
+// Both default to null/null — i.e. legacy behavior.
+export function makeTable(categories, opts) {
+  const { puzzleId = null, crossPuzzleState = null } = opts || {};
+  return { categories, facts: new Map(), puzzleId, crossPuzzleState };
 }
 
 export function cloneTable(t) {
-  return { categories: t.categories, facts: new Map(t.facts) };
+  return {
+    categories: t.categories,
+    facts: new Map(t.facts),
+    puzzleId: t.puzzleId ?? null,
+    crossPuzzleState: t.crossPuzzleState ?? null,
+  };
 }
 
 export function getFact(table, catA, a, catB, b) {
@@ -50,7 +83,8 @@ export function getFactEntry(table, catA, a, catB, b) {
 
 // Push a fact and run the three cascades (exclusivity, transitivity, last-option)
 // to fixed point. Every derived fact is appended to `trace` (if non-null) in the
-// order it was committed.
+// order it was committed. When the table carries a `puzzleId`, every stored fact
+// is stamped with it for downstream consumers; otherwise facts are left unmarked.
 export function pushFact(table, catA, a, catB, b, value, source, trace) {
   const queue = [{ catA, a, catB, b, value, source }];
   const derived = [];
@@ -59,6 +93,7 @@ export function pushFact(table, catA, a, catB, b, value, source, trace) {
     const cur = getFact(table, f.catA, f.a, f.catB, f.b);
     if (cur === f.value) continue;
     if (cur !== null && cur !== f.value) return { ok: false };
+    if (table.puzzleId != null) f.puzzleId = table.puzzleId;
     table.facts.set(canonKey(f.catA, f.a, f.catB, f.b), f);
     derived.push(f);
     if (trace) trace.push(f);
@@ -135,13 +170,11 @@ export function pushFact(table, catA, a, catB, b, value, source, trace) {
 // and runs clue propagation to fixed point. Initial marks are pushed via pushFact with
 // source {type: 'mark'} so their cascade fires and any later trace-walking terminates at them.
 // solveWithClues is now a thin wrapper for the empty-seed case (generator flow).
-// ----- Run propagation to fixed point -----
-// Core solver: starts from a seeded table of `initialMarks` (each: {catA, a, catB, b, value})
-// and runs clue propagation to fixed point. Initial marks are pushed via pushFact with
-// source {type: 'mark'} so their cascade fires and any later trace-walking terminates at them.
-// solveWithClues is now a thin wrapper for the empty-seed case (generator flow).
-export function solveFromState(categories, clues, initialMarks, trace) {
-  const table = makeTable(categories);
+//
+// Optional `opts = { puzzleId, crossPuzzleState }` is forwarded to makeTable.
+// When omitted, behaviour is identical to before this scaffolding shipped.
+export function solveFromState(categories, clues, initialMarks, trace, opts) {
+  const table = makeTable(categories, opts);
 
   // Seed initial marks. If two marks contradict each other (or their cascades collide),
   // we return contradiction immediately with contradictionSource: 'marks'.
@@ -186,6 +219,6 @@ export function solveFromState(categories, clues, initialMarks, trace) {
   return { table, status: determined ? 'solved' : 'underdetermined', passes: pass };
 }
 
-export function solveWithClues(categories, clues, trace) {
-  return solveFromState(categories, clues, [], trace);
+export function solveWithClues(categories, clues, trace, opts) {
+  return solveFromState(categories, clues, [], trace, opts);
 }
