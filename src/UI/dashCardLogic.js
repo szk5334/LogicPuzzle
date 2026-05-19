@@ -291,12 +291,25 @@ export const PRESETS = {
       adaptiveMin: true,
     },
   },
+  naturalBrutal: {
+    label: 'Brutal (natural)',
+    group: 'natural',
+    note: 'No type restriction · uncapped · 500 samples to hunt outliers',
+    config: {
+      difficulty: 'hard',
+      priorityMode: 'bandBrutal',
+      sampleCount: 500,
+      typeFocusMode: 'natural',
+      customAssignments: {},
+      adaptiveMin: true,
+    },
+  },
 };
 
 // Pre-sorted preset groups for the UI.
 export const PRESET_GROUPS = {
   curated: ['easy', 'medium', 'hard', 'brutal'],
-  natural: ['naturalEasy', 'naturalMedium', 'naturalHard'],
+  natural: ['naturalEasy', 'naturalMedium', 'naturalHard', 'naturalBrutal'],
 };
 
 // Rotation pools per band — top 3 verified combos per band, for future
@@ -324,11 +337,13 @@ export const BAND_ROTATION_POOLS = {
   ],
 };
 
-// Default config — Classic Balanced, centered defaults.
+// Default config — matches the naturalMedium preset so the simplified UI's
+// Medium button is active on first load. (To revert to the older
+// "balance / 10 samples" default, see the prior commit.)
 export const DEFAULT_CONFIG = {
   difficulty: 'medium',
-  priorityMode: 'balance',
-  sampleCount: 10,
+  priorityMode: 'bandMedium',
+  sampleCount: 25,
   typeFocusMode: 'natural',
   customAssignments: {},
   adaptiveMin: true,

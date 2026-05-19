@@ -24,7 +24,70 @@ import {
 // inline — it remains available for future curation tooling.
 export { configToEngineFocus, DEFAULT_CONFIG, estimateMetrics, PRESETS, ALL_TYPES } from './dashCardLogic.js';
 
+// ----------------------------------------------------------------------------
+// UI MODE FLAG
+// ----------------------------------------------------------------------------
+// The simplified player-facing surface is four band buttons: Easy / Medium /
+// Hard / Brutal, all using natural type distribution and band-capped scoring.
+// To re-enable the full customization UI (priority dropdown, type-focus
+// checklist, presets group, sample count, adaptive-min toggle), flip this to
+// true. All advanced state and logic is preserved — only the rendering is
+// gated.
+const SHOW_ADVANCED = false;
+
+// The four simplified band buttons. Each maps 1:1 to a natural-distribution
+// preset key in dashCardLogic.PRESETS.
+const BAND_BUTTONS = [
+  { presetKey: 'naturalEasy',   label: 'Easy',   range: '≤200'    },
+  { presetKey: 'naturalMedium', label: 'Medium', range: '201–300' },
+  { presetKey: 'naturalHard',   label: 'Hard',   range: '301–400' },
+  { presetKey: 'naturalBrutal', label: 'Brutal', range: '400+'    },
+];
+
 export function DashCard({ config, onChange }) {
+  if (!SHOW_ADVANCED) {
+    return <SimplifiedDashCard config={config} onChange={onChange} />;
+  }
+  return <AdvancedDashCard config={config} onChange={onChange} />;
+}
+
+// ----------------------------------------------------------------------------
+// Simplified view — four band buttons, nothing else. The active button is the
+// one whose priorityMode matches the current config. Clicking overwrites the
+// whole config from the preset.
+// ----------------------------------------------------------------------------
+function SimplifiedDashCard({ config, onChange }) {
+  return (
+    <div className="space-y-2 text-sm">
+      <div className="text-[11px] ink-faded uppercase tracking-widest mb-1.5">Difficulty</div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {BAND_BUTTONS.map(({ presetKey, label, range }) => {
+          const preset = PRESETS[presetKey];
+          const active = config.priorityMode === preset.config.priorityMode;
+          return (
+            <button
+              key={presetKey}
+              className={`ctrl-btn flex flex-col items-center justify-center py-3 ${active ? 'active' : ''}`}
+              title={preset.note}
+              onClick={() => onChange({ ...preset.config })}
+            >
+              <span className="text-base font-bold leading-tight">{label}</span>
+              <span className="ink-faded text-[10px] mt-0.5">{range}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// Advanced view — the full customization surface (presets grouped curated +
+// natural, difficulty band, priority mode, sample count, type focus mode,
+// custom type checklist, adaptive minimization). Preserved unchanged behind
+// SHOW_ADVANCED for power-user iteration and future curation work.
+// ----------------------------------------------------------------------------
+function AdvancedDashCard({ config, onChange }) {
   const set = (patch) => onChange({ ...config, ...patch });
 
   // Cycle a single type through off → fixed → rotate → off. Deletes the key
