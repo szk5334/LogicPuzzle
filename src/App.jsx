@@ -130,6 +130,12 @@ export default function App() {
         const p = generatePuzzle(themes[themeKey], numCategories, numItems, difficulty, generateConfig);
         if (p.status === 'solved') {
           p._score = scorePuzzle(p, priorityMode);
+          // Always store the raw difficulty score for display. The priority
+          // mode score drives winner-selection but may be a penalty value
+          // (e.g., bandHard gives -100k+ to above-cap samples) which would
+          // wreck the SamplingPanel histogram. _difficulty is always the
+          // human-readable passes²×leverage number.
+          p._difficulty = scorePuzzle(p, 'difficulty');
           p.par = computePar(p);
           p._themeKey = themeKey;  // bind for stable rendering across dropdown changes
           accum.push(p);
